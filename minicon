@@ -1,0 +1,444 @@
+#!/bin/bash
+#
+# minicon - Minimization of filesystems for containers
+# https://github.com/grycap/minicon
+#
+# Copyright (C) GRyCAP - I3M - UPV 
+# Developed by Carlos A. caralla@upv.es
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Checking dependencies
+function remove_from_plugins() {
+  local P="$1"
+  PLUGINS_ACTIVATED="$(echo "$PLUGINS_ACTIVATED" | sed "s/\(^\|,\)\($P\(\|:[^,]*\)\)\(,\|$\)/\1\4/g")"
+}
+
+function verify_dependencies() {
+  if ! strace -V > /dev/null 2> /dev/null; then
+    remove_from_plugins "strace"
+    p_warning "disabling strace plugin because strace command is not available"
+  fi
+  if ! file --version > /dev/null 2> /dev/null; then
+    remove_from_plugins "scripts"
+    p_warning "disabling scripts plugin because file command is not available"
+  fi
+  if [ "$TARFILE" != "" ]; then
+    if ! tar --version > /dev/null 2> /dev/null; then
+      finalize 1 "tar command is needed to create tar files"
+    fi
+  fi
+  if ! ldd --version > /dev/null 2> /dev/null; then
+    finalize 1 "ldd command is needed for scripts plugin"
+  fi
+}
+
+# Functions to output information depending on the configuration
+function p_errfile() {
+  if [ "$LOGFILE" == "" ]; then
+    echo "$@" >&2
+  else
+    touch -f "$LOGFILE"
+    if [ $? -eq 0 ]; then
+      echo "$@" >> "$LOGFILE"
+    fi
+  fi
+}
+
+function p_error() {
+  local O_STR="[ERROR] $(date +%Y.%m.%d-%X) $@"
+  p_errfile "$O_STR"
+}
+
+function p_warning() {
+  local O_STR="[WARNING] $(date +%Y.%m.%d-%X) $@"
+  p_errfile "$O_STR"
+}
+
+function p_info() {
+  local L
+  if [ "$VERBOSE" == "true" ]; then
+    local TS="$(date +%Y.%m.%d-%X)"
+    while read L; do
+      p_errfile "[INFO] $TS $@"
+    done <<< "$@"
+  fi
+}
+
+function p_out() {
+  if [ "$QUIET" != "true" ]; then
+    while read L; do
+      echo "$@"
+    done <<< "$@"
+  fi
+}
+
+function p_debug() {
+  local L
+  if [ "$DEBUG" == "true" ]; then
+    local TS="$(date +%Y.%m.%d-%X)"
+    while read L; do
+      p_errfile "[DEBUG] $TS $L"
+    done <<< "$@"
+  fi
+}
+
+function tempfile {
+  # Creates a unique temporary file
+  RES=$(/bin/tempfile 2> /dev/null)
+  if [ $? -ne 0 ]; then
+    RES=$(mktemp 2> /dev/null)
+    while [ $? -ne 0 ]; do
+      RES=/tmp/ftemp_${RANDOM}_$(date +%s)
+      touch $RES
+    done
+  fi
+  echo $RES
+}
+
+function tempdir() {
+  # Creates a unique temporary folder
+  local RES
+  RES=$(/bin/tempfile 2> /dev/null)
+  if [ $? -ne 0 ]; then
+    RES=$(mktemp -d 2> /dev/null)
+    while [ $? -ne 0 ]; do
+      RES=/tmp/ftemp_${RANDOM}_$(date +%s)
+      mkdir -p $RES
+    done
+  else
+    rm -f "$RES" && mkdir -p "$RES"
+  fi
+  echo $RES
+}
+
+function finalize() {
+  # Finalizes the execution of the this script and shows an error (if provided)
+  local ERR=$1
+  shift
+  local COMMENT=$@
+  [ "$ERR" == "" ] && ERR=0
+  [ "$COMMENT" != "" ] && p_error "$COMMENT"
+  if [ "$KEEPTEMPORARY" != "true" ]; then
+    p_debug removing temporary folder "$TMPDIR"
+    rm -rf "$TMPDIR"
+  fi  
+  exit $ERR
+}
+
+function copy() {
+  # copies one file (or folder) to the same destination in the root filesystem
+  # - it does not overwrite contents
+  local SRC="$1"
+  local FILE="$2"
+  local DST
+  if [ "$VERBOSE" == "true" ]; then
+    p_info "  processing $SRC... "
+  fi
+  if [ ! -e "$SRC" ]; then
+    finalize 1 "failed to read $SRC"
+  fi
+  if [ "$FILE" != "" ]; then
+    mkdir -p "$(dirname "$ROOTFS/$FILE")"
+  fi
+  local SRCDIR="$(dirname "$SRC")"
+  DST="$ROOTFS/$SRCDIR"
+  mkdir -p "$DST"
+  if [ "$FILE" != "" ]; then
+    echo "$SRCDIR" >> "$ROOTFS/$FILE"
+  fi
+  p_debug "  copying $SRC to $DST"
+  if [ -d "$SRC" ]; then
+    cp -n -r "$SRC" "$DST"
+  else
+    cp -n "$SRC" "$DST"
+  fi
+}
+
+function is_plugin_active() {
+  # Checks whether a plugin is activated or not
+  if [[ "$PLUGINS_ACTIVATED" =~ (^|,)$1(|:[^,]+)(,|$) ]]; then
+    return 0
+  fi  
+  return 1
+}
+
+function plugin_parameter() {
+  # Gets the value of a parameter passed to a plugin
+  #   the format is: <plugin>:<param1>=<value1>:<param2>=<value2>...
+  local PLUGIN="$1"
+  local PARAMETER="$2"
+  local PARAMS PP PP2 K V
+
+  while read -d ',' PP; do
+    if [[ "$PP" =~ ^$PLUGIN\: ]]; then
+      PARAMS="${PP:$((${#PLUGIN}+1))}"
+      while read -d ':' PP2; do
+        IFS='=' read K V <<< "$PP2"
+        if [ "$K" == "$PARAMETER" ]; then
+          p_debug "found param $K with value $V"
+          echo "$V"
+        fi
+      done <<< "${PARAMS}:"
+    fi
+  done <<< "${PLUGINS_ACTIVATED},"
+  return 1
+}
+
+function PLUGIN_00_folder() {
+  # If it is a folder, just copy it to its location in the new FS
+  local S_PATH="$1"
+
+  if [ -d "$S_PATH" ]; then
+    p_debug "copying the whole folder $S_PATH"
+    copy "$S_PATH"
+    return 1
+  fi
+
+  return 0
+}
+
+function PLUGIN_01_file() {
+  # If it is a file that is not executable, just copy it to its location in the new FS
+  local S_PATH="$1"
+
+  local COMMAND="$(which -- $S_PATH)"
+  if [ "$COMMAND" == "" ]; then
+    p_debug "copying single file $S_PATH"
+    return 1
+  fi
+
+  return 0
+}
+
+function PLUGIN_09_ldd() {
+  # Checks the list of dynamic libraries using ldd and copy them to the proper folder
+  local S_PATH="$1"
+  local LIBS= LIB=
+  local COMMAND="$(which -- $S_PATH)"
+  if [ "$COMMAND" == "" ]; then
+    p_debug "cannot analize $S_PATH using ldd"
+    return 0
+  fi
+
+  p_info "inspect command $COMMAND"
+  ldd "$COMMAND" > /dev/null 2> /dev/null
+  if [ $? -eq 0 ]; then
+    LIBS="$(ldd "$COMMAND" | sed 's/^[ \t]*//g' | sed 's/^.* => //g' | sed 's/(.*)//' | sed '/^[ ]*$/d')"
+    for LIB in $LIBS; do
+      copy "$LIB" "$LDCONFIGGILE"
+    done
+  fi
+
+  copy "$COMMAND"
+}
+
+function PLUGIN_10_strace() {
+  # Execute the app without any parameter, using strace and see which files does it open 
+  local SECONDSSIM=$(plugin_parameter "strace" "seconds")
+  if [[ ! $SECONDSSIM =~ ^[0-9]*$ ]]; then
+    SECONDSSIM=3
+  fi
+  if [ "$SECONDSSIM" == "" ]; then
+    SECONDSSIM=3
+  fi
+  local EXCLUDEFOLDERS=$(plugin_parameter "strace" "exclude")
+
+  local S_PATH="$1"
+
+  local COMMAND="$(which -- $S_PATH)"
+  if [ "$COMMAND" == "" ]; then
+    p_debug "cannot analize $S_PATH using strace"
+    return 0
+  fi
+
+  p_info "analysing command $COMMAND using strace and $SECONDSSIM seconds"
+
+  local TMPFILE=$(tempfile)
+  {
+    timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" $COMMAND > /dev/null 2> /dev/null
+  } > /dev/null 2> /dev/null
+
+  local FUNCTIONS="open|exec.*"
+  local STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"
+  local S EXCLUDE EF
+  while read S; do
+    S="${S:1:-1}"
+    if [ "$S" != "" -a "${S::1}" != "-" ]; then
+      S="$(readlink -e -- ${S})"
+      if [ "$S" != "" -a -e "$S" -a ! -d "$S" -a -f "$S" ]; then
+        EXCLUDE=false
+        for EF in $EXCLUDEFOLDERS; do
+          if [ "$EF" == "${S:0:${#EF}}" ]; then
+            EXCLUDE=true
+          fi
+        done
+        if [ "$EXCLUDE" != "true" ]; then
+          p_debug "file $S was used"
+          copy "$S"
+        else
+          p_debug "skipping file $S because it is in a excluded folder"
+        fi
+      fi
+    fi
+  done <<< "$STRINGS"
+  rm "$TMPFILE"
+
+  copy "$COMMAND"
+}
+
+function PLUGIN_11_scripts() {
+  # Checks the output of the invocation to the "file" command and guess whether it is a interpreted script or not
+  #  If it is, adds the interpreter to the list of commands to add to the container
+  p_debug "trying to guess if $1 is a interpreted script"
+
+  local S_PATH="$1"
+  local FILE_RES="$(file $S_PATH | grep -o ':.* script')"
+  FILE_RES="${FILE_RES:2:-7}"
+  FILE_RES="${FILE_RES,,}"
+  local SHELL_EXEC=
+  case "$FILE_RES" in
+    python) SHELL_EXEC=$(which python);;
+    "bourne-again shell") SHELL_EXEC=$(which bash);;
+    "a /usr/bin/perl") SHELL_EXEC=$(which perl);;
+  esac
+
+  # If we found a known interpreter, we'll add to the list of dependencies
+  if [ "$SHELL_EXEC" != "" ]; then
+    p_debug "found that $S_PATH needs $SHELL_EXEC"
+    COMMANDS_TO_ADD+=( "$SHELL_EXEC" )
+  fi
+  return 0
+}
+
+function PLUGIN_funcs() {
+  # Gets the list of plugins available for the app (those functions named PLUGIN_xxx_<plugin name>)
+  echo "$(typeset -F | grep PLUGIN_ | awk '{print $3}' | grep -v 'PLUGIN_funcs')"
+}
+
+function plugin_list() {
+  local P
+  while read P; do
+    echo -n "${P##*_},"
+  done <<< "$(PLUGIN_funcs)"
+  echo
+}
+
+# Now we are activating the basic plugins
+PLUGINS_ACTIVATED=folder,file,ldd
+COMMANDS_TO_ADD=()
+FORCEFOLDER=false
+ROOTFS=
+n=0
+while [ $# -gt 0 ]; do
+    if [ "${1:0:1}" == "-" -a "${1:1:1}" != "-" -a "${1:1:1}" != "" ]; then
+        for f in $(echo "${1:1}" | sed 's/\(.\)/-\1 /g' ); do
+            ARR[$n]="$f"
+            n=$(($n+1))
+        done
+    else
+        ARR[$n]="$1"
+        n=$(($n+1))
+    fi
+    shift
+done
+
+n=0
+while [ $n -lt ${#ARR[@]} ]; do
+    PARAM="${ARR[$n]}"
+    case "$PARAM" in
+        --plugin-all)           PLUGINS_ACTIVATED="$(plugin_list),${PLUGINS_ACTIVATED}";;
+        --plugin=*)             PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED},${PARAM:9}";;
+        --logfile|-g)           n=$(($n+1))
+                                LOGFILE="${ARR[$n]}";;
+        --quiet|-q)             QUIET=true;;
+        --tarfile|-t)           n=$(($n+1))
+                                TARFILE="${ARR[$n]}";;
+        --ldconfig|-l)          LDCONFIGGILE=/etc/ld.so.conf;;
+        --verbose|-v)           VERBOSE=true;;
+        --debug)                DEBUG=true;;
+        --force|-f)             FORCEFOLDER=true;;
+        --rootfs|-r)            n=$(($n+1))
+                                ROOTFS="${ARR[$n]}"
+                                if [ ! -d "$(dirname $ROOTFS)" ]; then
+                                  finalize 1 "invalid folder (parent folder must exist)"
+                                fi;;
+        --help | -h)            usage && finalize;;
+        --|*)                   [ "$PARAM" == "--" ] && n=$(($n+1))
+                                while [ $n -lt ${#ARR[@]} ]; do
+                                  PARAM="${ARR[$n]}"
+                                  COMMANDS_TO_ADD+=("$PARAM")
+                                  n=$(($n+1))
+                                done;;
+    esac
+    n=$(($n+1))
+done
+
+[ "$QUIET" == "true" ] && DEBUG= VERBOSE=
+
+if [ "$TARFILE" != "" -a "$ROOTFS" == "" ]; then
+  ROOTFS=$(tempdir)
+  FORCEFOLDER=true
+fi
+
+ROOTFS="$(readlink -f "$ROOTFS")"
+[ "$ROOTFS" == "" ] && finalize 1 "invalid folder to create the root filesystem (the parent folder MUST exist)"
+
+DANGER_FOLDERS="/ /etc /var /sys /proc"
+for F in $DANGER_FOLDERS; do
+  [ "$ROOTFS" == "$F" ] && finalize "refusing to build root filesystem in folder $ROOTFS"
+done
+  
+[ -e "$ROOTFS" -a ! -d "$ROOTFS" ] && finalize 1 "$ROOTFS exists but it is not a folder"
+
+if [ "$FORCEFOLDER" != "true" -a -d "$ROOTFS" ]; then
+  read -p "folder for root filesystem ($ROOTFS) already exists. Are you sure to use it? (y/N) " CONFIRM
+  if [ "${CONFIRM^^}" != "Y" ]; then
+    finalize 1 "aborting"
+  fi
+fi
+
+# Check dependencies first
+verify_dependencies
+
+p_debug "creating $ROOTFS"
+mkdir -p "$ROOTFS"
+
+i_current=0
+while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do
+  CURRENT_CMD="${COMMANDS_TO_ADD[$i_current]}"
+  for p in $(PLUGIN_funcs); do
+    if is_plugin_active "${p##*_}"; then
+      p_debug "invoking plugin ${p##*_}"
+      if ! $p "$CURRENT_CMD"; then
+        break
+      fi 
+    fi
+  done
+  i_current=$(($i_current+1))
+done
+
+if [ "$LDCONFIGGILE" != "" -a -e "$ROOTFS/$LDCONFIGGILE" ]; then
+  p_debug "creating ldconfig"
+  ldconfig -r "$ROOTFS"
+fi
+
+if [ "$TARFILE" != "" ]; then
+  if [ "$TARFILE" != "-" ]; then
+    p_info "producing tar file $TARFILE"
+    tar cf "$TARFILE" -C "$ROOTFS" .
+  else
+    tar c -C "$ROOTFS" .
+  fi
+fi

@@ -137,6 +137,36 @@ function finalize() {
   exit $ERR
 }
 
+# Reads a configuration file and set its variables (removes comments, blank lines, trailing spaces, etc. and
+# then reads KEY=VALUE settings)
+function readconf() {
+  local _CONF_FILE=$1
+  local _CURRENT_SECTION
+  local _TXT_CONF
+  local _CURRENT_KEY _CURRENT_VALUE
+
+  # If the config file does not exist return failure
+  if [ ! -e "$_CONF_FILE" ]; then
+    return 1
+  fi
+
+  # First we read the config file
+  _TXT_CONF="$(cat "$_CONF_FILE" | sed 's/#.*//g' | sed 's/^[ \t]*//g' | sed 's/[ \t]*$//g' | sed '/^$/d')"
+
+  # Let's read the lines
+  while read L; do
+    if [[ "$L" =~ ^\[.*\]$ ]]; then
+      # If we are reading a section, let's see if it is applicable to us
+      _CURRENT_SECTION="${L:1:-1}"
+    else
+      IFS='=' read _CURRENT_KEY _CURRENT_VALUE <<< "$L"
+      _CURRENT_VALUE="$(echo "$_CURRENT_VALUE" | envsubst)"
+      read -d '\0' "$_CURRENT_KEY" <<< "${_CURRENT_VALUE}"
+    fi
+  done <<< "$_TXT_CONF"
+  return 0
+}
+
 function copy() {
   # copies one file (or folder) to the same destination in the root filesystem
   # - it does not overwrite contents
@@ -244,6 +274,21 @@ function PLUGIN_09_ldd() {
   copy "$COMMAND"
 }
 
+function arrayze_cmd() {
+  # This function creates an array of parameters from a commandline. The special
+  # function of this function is that sometimes parameters are between quotes and the
+  # common space-separation is not valid. This funcion solves the problem of quotes and
+  # then a commandline can be invoked as "${ARRAY[@]}"
+  local AN="$1"
+  local _CMD="$2"
+  local R n=0
+  declare -g -n $AN
+  while read R; do
+    read ${AN}[n] <<< "$R"
+    n=$((n+1))
+  done < <(printf "%s\n" "$_CMD" | xargs -n 1 printf "%s\n")
+}
+
 function PLUGIN_10_strace() {
   # Execute the app without any parameter, using strace and see which files does it open 
   local SECONDSSIM=$(plugin_parameter "strace" "seconds")
@@ -253,10 +298,15 @@ function PLUGIN_10_strace() {
   if [ "$SECONDSSIM" == "" ]; then
     SECONDSSIM=3
   fi
+
+  # The list of folders whose files should be not considered for copying (e.g. /dev or /proc)
   local EXCLUDEFOLDERS=$(plugin_parameter "strace" "exclude")
 
-  local S_PATH="$1"
+  # A file that contains examples of calls for the commands to be considered (e.g. this is because
+  # some commands will not perform any operation if they do not have parameters; e.g. echo)
+  local EXECFILE=$(plugin_parameter "strace" "execfile")
 
+  local S_PATH="$1"
   local COMMAND="$(which -- $S_PATH)"
   if [ "$COMMAND" == "" ]; then
     p_debug "cannot analize $S_PATH using strace"
@@ -265,11 +315,42 @@ function PLUGIN_10_strace() {
 
   p_info "analysing command $COMMAND using strace and $SECONDSSIM seconds"
 
+  # Let's see if there is a specific commandline (with parameters) for this command in the file
+  local CMDTOEXEC CMDLINE
+  if [ -e "$EXECFILE" ]; then
+    local L 
+    while read L; do
+      CMDTOEXEC=
+      arrayze_cmd CMDLINE "$L"
+      n=0
+      while [ $n -lt ${#CMDLINE[@]} ]; do
+        if [ "${CMDLINE[$n]}" == "$COMMAND" ]; then
+          CMDTOEXEC="$L"
+          break
+        fi
+        n=$((n+1))
+      done
+      if [ "$CMDTOEXEC" != "" ]; then
+        break
+      fi
+    done < "$EXECFILE"
+    p_debug $n
+  fi
+
+  COMMAND=($COMMAND)
+
+  # If there is a specific commandline, we'll use it; otherwise we'll run the command as-is
+  if [ "$CMDTOEXEC" != "" ]; then
+    p_debug "will run $CMDTOEXEC"
+    COMMAND=( ${CMDLINE[@]} )
+  fi
+
   local TMPFILE=$(tempfile)
   {
-    timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" $COMMAND > /dev/null 2> /dev/null
+    timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" "${COMMAND[@]}" > /dev/null 2> /dev/null
   } > /dev/null 2> /dev/null
 
+  # Now we'll inspect the files that the execution has used
   local FUNCTIONS="open|exec.*"
   local STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"
   local S EXCLUDE EF
@@ -391,6 +472,8 @@ if [ "$TARFILE" != "" -a "$ROOTFS" == "" ]; then
   ROOTFS=$(tempdir)
   FORCEFOLDER=true
 fi
+
+[ "$ROOTFS" == "" ] && finalize 1 "you must provide a folder (--rootfs) to create the root filesystem or request a tar file (--tarfile)"
 
 ROOTFS="$(readlink -f "$ROOTFS")"
 [ "$ROOTFS" == "" ] && finalize 1 "invalid folder to create the root filesystem (the parent folder MUST exist)"

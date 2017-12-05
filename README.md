@@ -15,7 +15,7 @@ The purpose of **minicon** is better understood with the use cases explained in 
 
 Reducing the footprint of one container is of special interest, to redistribute the container images.
 
-It is of special interest in cases such as [SCAR](https://github.com/grycap/scar), that try to execute docker containers in AWS Lambda. In that case, the use cases are limited by the size of the container (the filesystem is limited to 512 Mb., and SCAR needs to push the image to AWS Lambda and then uncompress it; so the maximum size for the container is even more restricted).
+It is of special interest in cases such as [SCAR](https://github.com/grycap/scar), that executes containers out of Docker images in AWS Lambda. In that case, the use cases are limited by the size of the container (the ephemeral storage space is limited to 512 Mb., and SCAR needs to pull the image from Docker Hub into the ephemeral storage and then uncompress it; so the maximum size for the container is even more restricted).
 
 But there are also security reasons to minimize the unneeded application or environment available in one container image. In the case that the application fails, not having other applications reduces the impact of an intrusion (e.g. if the container does not need a compiler, why should it be there? maybe it would enable to compile a rootkit). 
 

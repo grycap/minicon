@@ -37,7 +37,7 @@ $ mv minicon /opt
 
 ### Dependencies
 
-**minicon** depends on the commands _ldd_, _file_, _strace_ and _tar_. Soy you need to install the proper packages in your system.
+**minicon** depends on the commands _ldd_, _file_, _strace_ and _tar_. So, you need to install the proper packages in your system.
 
 **Ubuntu**
 
@@ -61,7 +61,7 @@ $ ./minicon <option> <executables to analyze, files or folders to include>
 
 Some options are:
 - **--rootfs | -r**: Create the filesystem in a specific folder.
-- **--tar-file | -t**: Generate a tar file that contains the resulting filesystem. This is ideal to import it into docker using the command ```docker import tarfile.tar containerimage```. If not specified the _--rootfs_ parameter, **minicon** will use a temporary folder.
+- **--tar-file | -t**: Generate a tar file that contains the resulting filesystem. This is ideal to import it into Docker using the command ```docker import tarfile.tar containerimage```. If not specified the _--rootfs_ parameter, **minicon** will use a temporary folder.
 - **--ldconfig | -l**: Generate a _/etc/ldconfig.so_ file, adjusted to the new filesystem. It is suggested to always use this flag, to set the proper path to the libraries included in the new filesystem.
 - **--plugin**: Activates some plugins and sets the options for them (see the [Plug-ins](#plug-ins) section).
 - **--plugin-all**: Activates all the available plugins, using their default options (see the [Plug-ins](#plug-ins) sub-section).
@@ -410,7 +410,7 @@ We are using **minicon** to strip out any other things but the files that we nee
 ~/minicon$ docker run --rm -p 3000 -it -v $PWD:/tmp/minicon -w /tmp/minicon miniapp bash
 ```
 
-And now run **minicon** to get only de files needed (take into account that now we need the interpreter (node) and the app folder (i.e. /usr/src/app)):
+And now run **minicon** to get only the files needed (take into account that now we need the interpreter (node) and the app folder (i.e. /usr/src/app)):
 ```
 root@2ed82c5454a9:/tmp/minicon# ./minicon -l -t miniapp.tar node /usr/src/app
 [WARNING] 2017.11.29-18:15:18 disabling strace plugin because strace command is not available
@@ -441,7 +441,7 @@ In this case we have reduced the size of the container from 691MB to 45.4MB.
 ### Use case: FFMPEG
 **TL;DR:** The size of a common _Ubuntu+FFMPEG_ image is about 387Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
 
-Imagine that you want to run the latest version of the app _ffmpeg_ to convert your video files. The usual way to proceed will consist of
+Imagine that you want to run the latest version of the app _ffmpeg_ to convert your video files. The usual way to proceed will consist of:
 
 1. Creating a Docker file with a content like the next one:
 
@@ -462,7 +462,7 @@ $ docker build . -t ubuntu:ffmpeg
 $ docker run --rm -it -v /myvideos:/tmp/myvideos ubuntu:ffmpeg ffmpeg /tmp/myvideos ...
 ```
 
-This usual procedure is ok, but if you take a look at the size of the image, you will find something like the next:
+This usual procedure is ok, but if you take a look at the size of the image, you will find something as follows:
 
 ```bash
 $ docker images

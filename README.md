@@ -6,6 +6,8 @@ When you run containers (e.g. in Docker), you usually run a system that has a wh
 
 The purpose of **minicon** is better understood with the use cases explained in depth in the section [Use Cases](#use-cases).
 
+1. **Basic Example ([direct link](#use-case-basic-example))**, that distributes only the set of tools, instead of distributing a whole Linux image. In this case the size is reduced from 123Mb. to about 8Mb.
+1. **Basic _user interface_ that need to access to other servers ([direct link](#use-case-basic-user-interface-ssh-cli-wget-vim))**. In this case we have reduced from 222Mb. to about 16Mb., and also we have made that the users only can use a reduced set of tools (ssh, ping, wget, etc.).
 1. **Node.JS+Express application ([direct link](#use-case-nodejsexpress-application))**: The size of the defaut NodeJS Docker image (i.e. node:latest), ready to run an application is about from 691MB. Applying **minicon** to that container, the size is reduced to about 45.4MB.
 1. **Use case: FFMPEG ([direct link](#use-case-ffmpeg))**: The size of a common _Ubuntu+FFMPEG_ image is about 387Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
 
@@ -47,7 +49,6 @@ $ apt-get install libc-bin tar file strace
 ```bash
 $ yum install glibc-common tar file strace
 ```
-
 ## Usage
 
 **minicon** has a lot of options. You are advised to run ```./minicon --help``` to get the latest information about the usage of the application.
@@ -94,7 +95,6 @@ $ docker import mycontainer_minimized.tar mycontainer:minimized
 $ docker run -it mycontainer:minimized bash
 ```
 
-
 ### Plug-ins
 
 **minicon** includes two important plugins in the default distribution: _strace_ and _scripts_:
@@ -134,7 +134,7 @@ $ ./minicon -t tarfile --plugin=strace /usr/games/cowsay
 $ ./minicon -t tarfile --plugin=strace:execfile=./mycommand  /usr/games/cowsay
 # The next execution will try to execute the application cowsay for 10 seconds, and will look for a commandline in the file "mycommand" in the current folder
 $ ./minicon -t tarfile --plugin=strace:seconds=10:execfile=./mycommand  /usr/games/cowsay
-# The next execution will try to execute the application cowsay for 3 seconds (the default value), but will exclude any file used by the application that is found either in /dev or /proc
+# The next execution will try to execute the application bash for 3 seconds (the default value), but will exclude any file used by the application that is found either in /dev or /proc
 $ ./minicon -t tarfile --plugin=strace:exclude=/dev:exclude=/proc bash
 ```
 
@@ -154,8 +154,172 @@ $ ./minicon -t tarfile --plugin=scripts ./minicon
 
 This section includes the whole process to re-produce two use cases in which **minicon** can reduce the footprint of the size of the Docker containers.
 
+1. Distributing only the set of tools needed for an _user interface_, instead of distributing a whole Linux image reduces the size from 123Mb. to about 8Mb.
+1. Having a basic _user interface_ for the users, that need to access to other servers. In this case we have reduced from 222Mb. to about 16Mb., and also we have made that the users only can use a reduced set of tools (ssh, ping, wget, etc.).
 1. A NodeJS application which is reduced from about 691MB to about 45.4MB.
 1. The FFMPEG application which is reduced from about 387Mb. to about 119Mb.
+
+### Use Case: Basic example
+You can download the _ubuntu:latest_ docker image and check its size: 
+
+```bash
+$ docker pull ubuntu
+Using default tag: latest
+latest: Pulling from library/ubuntu
+660c48dd555d: Pull complete 
+4c7380416e78: Pull complete 
+421e436b5f80: Pull complete 
+e4ce6c3651b3: Pull complete 
+be588e74bd34: Pull complete 
+Digest: sha256:7c67a2206d3c04703e5c23518707bdd4916c057562dd51c74b99b2ba26af0f79
+Status: Downloaded newer image for ubuntu:latest
+$ docker images
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ubuntu              latest              20c44cd7596f        2 weeks ago         123MB
+```
+
+A simple example will be to create a container that only contains a few commands (e.g. _bash_, _ls_, _mkdir_, etc.):
+
+```bash
+$ docker run --rm -it -v $PWD:/tmp/minicon ubuntu:latest /tmp/minicon/minicon -t /tmp/minicon/minibash.tar bash ls mkdir less cat find
+[WARNING]  2017.12.05-12:45:24 disabling strace plugin because strace command is not available
+[WARNING]  2017.12.05-12:45:24 disabling scripts plugin because file command is not available
+```
+
+Then you can import the container in Docker and check the difference of sizes:
+```bash
+$ docker import minibash.tar ubuntu:minibash
+sha256:e4b5fa4f772d47b19ebe41544c52fd6c048a5a5d5abcac1d1e1efc30e3237025
+$ docker images
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ubuntu              minibash            e4b5fa4f772d        20 seconds ago      9.44MB
+ubuntu              latest              20c44cd7596f        2 weeks ago         123MB
+```
+
+The size has been reduced dramatically, but **of course** you only have the requested files inside the container.
+
+```bash
+$ tar tf minibash.tar 
+$ docker run --rm -it ubuntu:minibash find /bin /lib /usr /lib64
+$ docker run --rm -it ubuntu:minibash ls /
+```
+
+<details>
+ <summary>Click to show the whole execution (for verification purposes).</summary>
+
+```bash
+$ tar tf minibash.tar 
+./
+./bin/
+./bin/cat
+./bin/ls
+./bin/mkdir
+./bin/bash
+./tmp/
+./proc/
+./lib/
+./lib/x86_64-linux-gnu/
+./lib/x86_64-linux-gnu/libpcre.so.3
+./lib/x86_64-linux-gnu/libc-2.23.so
+./lib/x86_64-linux-gnu/libc.so.6
+./lib/x86_64-linux-gnu/libdl.so.2
+./lib/x86_64-linux-gnu/libm.so.6
+./lib/x86_64-linux-gnu/libtinfo.so.5
+./lib/x86_64-linux-gnu/libtinfo.so.5.9
+./lib/x86_64-linux-gnu/libm-2.23.so
+./lib/x86_64-linux-gnu/libpthread.so.0
+./lib/x86_64-linux-gnu/libselinux.so.1
+./lib/x86_64-linux-gnu/ld-2.23.so
+./lib/x86_64-linux-gnu/libdl-2.23.so
+./lib/x86_64-linux-gnu/libpthread-2.23.so
+./lib/x86_64-linux-gnu/libpcre.so.3.13.2
+./usr/
+./usr/bin/
+./usr/bin/find
+./lib64/
+./lib64/ld-linux-x86-64.so.2
+./dev/
+$ docker run --rm -it ubuntu:minibash find /bin /lib /usr /lib64
+/bin
+/bin/cat
+/bin/ls
+/bin/mkdir
+/bin/bash
+/lib
+/lib/x86_64-linux-gnu
+/lib/x86_64-linux-gnu/libpcre.so.3
+/lib/x86_64-linux-gnu/libc-2.23.so
+/lib/x86_64-linux-gnu/libc.so.6
+/lib/x86_64-linux-gnu/libdl.so.2
+/lib/x86_64-linux-gnu/libm.so.6
+/lib/x86_64-linux-gnu/libtinfo.so.5
+/lib/x86_64-linux-gnu/libtinfo.so.5.9
+/lib/x86_64-linux-gnu/libm-2.23.so
+/lib/x86_64-linux-gnu/libpthread.so.0
+/lib/x86_64-linux-gnu/libselinux.so.1
+/lib/x86_64-linux-gnu/ld-2.23.so
+/lib/x86_64-linux-gnu/libdl-2.23.so
+/lib/x86_64-linux-gnu/libpthread-2.23.so
+/lib/x86_64-linux-gnu/libpcre.so.3.13.2
+/usr
+/usr/bin
+/usr/bin/find
+/lib64
+/lib64/ld-linux-x86-64.so.2
+$ docker run --rm -it ubuntu:minibash ls /
+bin  dev  etc  lib  lib64  proc  sys  tmp  usr
+```
+</details>
+
+### Use Case: Basic User Interface (SSH Cli, wget, vim)
+
+In this use case we are building a basic user interface for the users, that need to access to other servers. The users will need commands like _ssh_, _wget_, _ping_, etc.
+
+In the general case, we will use a Dockerfile like the next one:
+
+```Dockerfile
+FROM ubuntu
+RUN apt-get update && apt-get install -y ssh iproute2 iputils-ping wget
+```
+
+And we will build using the next command:
+
+```bash
+$ docker build . -t basic-ui
+```
+
+Now we have the container image called ```basic-ui``` that will serve for our purposes. We can inspect its size:
+
+```bash
+$ docker images
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+basic-ui            latest              58acd895d8d1        2 minutes ago       222MB
+```
+
+But we can reduce the size, if we know which tools we want to provide to our users. From the folder in which it is installed **minicon**, we can execute the following commands to minimize the container and to import it into docker:
+
+```
+$ cat > ./execfile-cmd << EOF
+ssh localhost
+/usr/bin/ssh localhost
+/bin/ping -c 1 www.google.es
+EOF
+$ docker run --privileged --rm -it -v $PWD:/tmp/minicon basic-ui bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/basic-ui-min.tar -l --plugin=strace:execfile=/tmp/minicon/execfile-cmd bash ssh ip id cat ls mkdir ping wget'
+$ docker import basic-ui-min.tar basic-ui:lean
+```
+
+> In this case we needed to use the plugin _strace_ to guess which files are needed for the applications. E.g. the libraries for DNS resolution, configuration files, etc. So we created some simple examples of commandlines for some of the applications that we are including in the container.
+
+And now we have a container with a very reduced size:
+
+```
+$ docker images
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+basic-ui            lean                21e481217b6c        8 seconds ago       16MB
+basic-ui            latest              58acd895d8d1        7 minutes ago       222MB
+```
+
+In this case we have reduced from 222Mb. to about 16Mb., and also we have made that the users only can use a reduced set of tools.
 
 ### Use Case: Node.JS+Express application
 **TL;DR:** the image of a NodeJS+Express application can be reduced from 691MB (using the standard image of node; i.e. _node:latest_) to 45.4MB (just including the node environment).

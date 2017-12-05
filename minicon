@@ -19,6 +19,43 @@
 # limitations under the License.
 #
 
+function usage() {
+  cat <<EOF
+minicon aims at reducing the footprint of the filesystem for the container, just adding those 
+  files that are needed. That means that the other files in the original container are removed.
+
+$0 <option> <executables to analyze, files or folders to include>
+
+  --rootfs | -r     Create the filesystem in a specific folder.
+  --tar-file | -t   Generate a tar file that contains the resulting filesystem. This is
+                    ideal to import it into docker using the command "docker import". If 
+                    not specified the --rootfs parameter, minicon will use a temporary 
+                    folder.
+  --ldconfig | -l   Generate a /etc/ldconfig.so file, adjusted to the new filesystem. 
+                    It is suggested to always use this flag, to set the proper path to the
+                    libraries included in the new filesystem.
+  --plugin          Activates some plugins and sets the options for them. The syntax is
+                    --plugin=<plugin name>:<parameter>=<value>:<parameter>=<value>...
+  --plugin-all      Activates all the available plugins, using their default options.
+  --verbose | -v    Shows more information about the procedure.
+  --debug           Shows a lot more information about the procedure.
+  --help | -h       Shows this help and exits.
+
+  Examples:
+    # The next execution will try to execute the application bash for 3 seconds 
+    # (the default value), but will exclude any file used by the application that 
+    # is found either in /dev or /proc
+
+    $ ./minicon -t tarfile --plugin=strace:exclude=/dev:exclude=/proc bash
+
+    # The next execution will create a minimal container filesystem that only contains
+    # bash, ls and mkdir. The result can be imported in Docker using the command
+    # (e.g.) docker import minicont.tar test:mini
+    $ docker run --rm --plugin-all -it -v \$PWD:/tmp/minicon \\
+      ubuntu:latest /tmp/minicon/minicon -l -t minicont.tar bash ls mkdir
+EOF
+}
+
 # Checking dependencies
 function remove_from_plugins() {
   local P="$1"
@@ -265,7 +302,7 @@ function PLUGIN_09_ldd() {
   p_info "inspect command $COMMAND"
   ldd "$COMMAND" > /dev/null 2> /dev/null
   if [ $? -eq 0 ]; then
-    LIBS="$(ldd "$COMMAND" | grep -v 'linux-vdso' | sed 's/^[ \t]*//g' | sed 's/^.* => //g' | sed 's/(.*)//' | sed '/^[ ]*$/d')"
+    LIBS="$(ldd "$COMMAND" | grep -v 'linux-vdso' | grep -v 'statically' | sed 's/^[ \t]*//g' | sed 's/^.* => //g' | sed 's/(.*)//' | sed '/^[ ]*$/d')"
     for LIB in $LIBS; do
       copy "$LIB" "$LDCONFIGGILE"
       add_command "$LIB"

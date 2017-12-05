@@ -57,12 +57,12 @@ function p_errfile() {
 }
 
 function p_error() {
-  local O_STR="[ERROR] $(date +%Y.%m.%d-%X) $@"
+  local O_STR="[ERROR] $LOGGER $(date +%Y.%m.%d-%X) $@"
   p_errfile "$O_STR"
 }
 
 function p_warning() {
-  local O_STR="[WARNING] $(date +%Y.%m.%d-%X) $@"
+  local O_STR="[WARNING] $LOGGER $(date +%Y.%m.%d-%X) $@"
   p_errfile "$O_STR"
 }
 
@@ -71,7 +71,7 @@ function p_info() {
   if [ "$VERBOSE" == "true" ]; then
     local TS="$(date +%Y.%m.%d-%X)"
     while read L; do
-      p_errfile "[INFO] $TS $@"
+      p_errfile "[INFO] $LOGGER $TS $@"
     done <<< "$@"
   fi
 }
@@ -89,8 +89,16 @@ function p_debug() {
   if [ "$DEBUG" == "true" ]; then
     local TS="$(date +%Y.%m.%d-%X)"
     while read L; do
-      p_errfile "[DEBUG] $TS $L"
+      p_errfile "[DEBUG] $LOGGER $TS $L"
     done <<< "$@"
+  fi
+}
+
+function set_logger() {
+  if [ "$1" != "" ]; then
+    LOGGER="[$1]"
+  else
+    LOGGER=
   fi
 }
 
@@ -177,7 +185,7 @@ function copy() {
     p_info "  processing $SRC... "
   fi
   if [ ! -e "$SRC" ]; then
-    finalize 1 "failed to read $SRC"
+    p_error 1 "failed to read $SRC"
   fi
   if [ "$FILE" != "" ]; then
     mkdir -p "$(dirname "$ROOTFS/$FILE")"
@@ -239,24 +247,16 @@ function PLUGIN_00_folder() {
   return 0
 }
 
-function PLUGIN_01_file() {
-  # If it is a file that is not executable, just copy it to its location in the new FS
-  local S_PATH="$1"
-
-  local COMMAND="$(which -- $S_PATH)"
-  if [ "$COMMAND" == "" ]; then
-    p_debug "copying single file $S_PATH"
-    return 1
-  fi
-
-  return 0
-}
-
 function PLUGIN_09_ldd() {
   # Checks the list of dynamic libraries using ldd and copy them to the proper folder
   local S_PATH="$1"
   local LIBS= LIB=
   local COMMAND="$(which -- $S_PATH)"
+  if [ "$COMMAND" == "" ]; then
+    COMMAND="$S_PATH"
+  fi
+
+  COMMAND="$(readlink -e $COMMAND)"
   if [ "$COMMAND" == "" ]; then
     p_debug "cannot analize $S_PATH using ldd"
     return 0
@@ -265,13 +265,31 @@ function PLUGIN_09_ldd() {
   p_info "inspect command $COMMAND"
   ldd "$COMMAND" > /dev/null 2> /dev/null
   if [ $? -eq 0 ]; then
-    LIBS="$(ldd "$COMMAND" | sed 's/^[ \t]*//g' | sed 's/^.* => //g' | sed 's/(.*)//' | sed '/^[ ]*$/d')"
+    LIBS="$(ldd "$COMMAND" | grep -v 'linux-vdso' | sed 's/^[ \t]*//g' | sed 's/^.* => //g' | sed 's/(.*)//' | sed '/^[ ]*$/d')"
     for LIB in $LIBS; do
       copy "$LIB" "$LDCONFIGGILE"
+      add_command "$LIB"
     done
   fi
 
   copy "$COMMAND"
+}
+
+function add_command() {
+  local CMDTOADD="$1"
+  local n=0
+  local ALREADY_EXISTS=false
+  while [ $n -lt ${#COMMANDS_TO_ADD[@]} ]; do
+    if [ "$CMDTOADD" == "${COMMANDS_TO_ADD[$n]}" ]; then
+      ALREADY_EXISTS=true
+      break
+    fi
+    n=$((n+1))
+  done
+  if [ "$ALREADY_EXISTS" == "false" ]; then
+    p_debug "need to analyze $CMDTOADD"
+    COMMANDS_TO_ADD+=( "$CMDTOADD" )
+  fi
 }
 
 function arrayze_cmd() {
@@ -287,6 +305,33 @@ function arrayze_cmd() {
     read ${AN}[n] <<< "$R"
     n=$((n+1))
   done < <(printf "%s\n" "$_CMD" | xargs -n 1 printf "%s\n")
+}
+
+function analyze_strace_strings() {
+  local STRINGS="$1"
+  local EXCLUDEFOLDERS="$2"
+
+  local S EXCLUDE EF
+  while read S; do
+    S="${S:1:-1}"
+    if [ "$S" != "" -a "${S::1}" != "-" ]; then
+      S="$(readlink -e -- ${S})"
+      if [ "$S" != "" -a -e "$S" -a ! -d "$S" -a -f "$S" ]; then
+        EXCLUDE=false
+        for EF in $EXCLUDEFOLDERS; do
+          if [ "$EF" == "${S:0:${#EF}}" ]; then
+            EXCLUDE=true
+          fi
+        done
+        if [ "$EXCLUDE" != "true" ]; then
+          p_debug "file $S was used"
+          echo "$S"
+        else
+          p_debug "skipping file $S because it is in a excluded folder"
+        fi
+      fi
+    fi
+  done <<< "$STRINGS"
 }
 
 function PLUGIN_10_strace() {
@@ -334,7 +379,6 @@ function PLUGIN_10_strace() {
         break
       fi
     done < "$EXECFILE"
-    p_debug $n
   fi
 
   COMMAND=($COMMAND)
@@ -351,29 +395,29 @@ function PLUGIN_10_strace() {
   } > /dev/null 2> /dev/null
 
   # Now we'll inspect the files that the execution has used
-  local FUNCTIONS="open|exec.*"
-  local STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"
-  local S EXCLUDE EF
-  while read S; do
-    S="${S:1:-1}"
-    if [ "$S" != "" -a "${S::1}" != "-" ]; then
-      S="$(readlink -e -- ${S})"
-      if [ "$S" != "" -a -e "$S" -a ! -d "$S" -a -f "$S" ]; then
-        EXCLUDE=false
-        for EF in $EXCLUDEFOLDERS; do
-          if [ "$EF" == "${S:0:${#EF}}" ]; then
-            EXCLUDE=true
-          fi
-        done
-        if [ "$EXCLUDE" != "true" ]; then
-          p_debug "file $S was used"
-          copy "$S"
-        else
-          p_debug "skipping file $S because it is in a excluded folder"
-        fi
+  local FUNCTIONS
+  local STRINGS
+  local L BN
+
+  FUNCTIONS="open"
+  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  while read L; do
+    if [ "$L" != "" ]; then
+      BN="$(basename $L)"
+      if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
+        add_command "$L"
+      else
+        copy "$L"
       fi
     fi
-  done <<< "$STRINGS"
+  done <<< "$(analyze_strace_strings "$STRINGS" "$EXCLUDEFOLDERS")"
+
+  FUNCTIONS="exec.*"
+  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  while read L; do
+    [ "$L" != "" ] && add_command "$L"
+  done <<< "$(analyze_strace_strings "$STRINGS" "$EXCLUDEFOLDERS")"
+
   rm "$TMPFILE"
 
   copy "$COMMAND"
@@ -384,7 +428,13 @@ function PLUGIN_11_scripts() {
   #  If it is, adds the interpreter to the list of commands to add to the container
   p_debug "trying to guess if $1 is a interpreted script"
 
-  local S_PATH="$1"
+  local S_PATH="$(which -- $1)"
+
+  if [ "$S_PATH" == "" ]; then
+    p_warning "$1 cannot be executed (if it should, please check the path)"
+    return 0
+  fi
+
   local FILE_RES="$(file $S_PATH | grep -o ':.* script')"
   FILE_RES="${FILE_RES:2:-7}"
   FILE_RES="${FILE_RES,,}"
@@ -398,7 +448,7 @@ function PLUGIN_11_scripts() {
   # If we found a known interpreter, we'll add to the list of dependencies
   if [ "$SHELL_EXEC" != "" ]; then
     p_debug "found that $S_PATH needs $SHELL_EXEC"
-    COMMANDS_TO_ADD+=( "$SHELL_EXEC" )
+    add_command "$SHELL_EXEC"
   fi
   return 0
 }
@@ -417,7 +467,7 @@ function plugin_list() {
 }
 
 # Now we are activating the basic plugins
-PLUGINS_ACTIVATED=folder,file,ldd
+PLUGINS_ACTIVATED=folder,ldd
 COMMANDS_TO_ADD=()
 FORCEFOLDER=false
 ROOTFS=
@@ -497,6 +547,9 @@ verify_dependencies
 
 p_debug "creating $ROOTFS"
 mkdir -p "$ROOTFS"
+mkdir -p "$ROOTFS/tmp"
+mkdir -p "$ROOTFS/dev"
+mkdir -p "$ROOTFS/proc"
 
 i_current=0
 while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do
@@ -504,11 +557,15 @@ while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do
   for p in $(PLUGIN_funcs); do
     if is_plugin_active "${p##*_}"; then
       p_debug "invoking plugin ${p##*_}"
+      _C_PLUGIN="${p##*_}"
+      set_logger "${_C_PLUGIN^^}"
       if ! $p "$CURRENT_CMD"; then
         break
       fi 
+      set_logger
     fi
   done
+  set_logger
   i_current=$(($i_current+1))
 done
 

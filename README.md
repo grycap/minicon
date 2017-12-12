@@ -6,10 +6,10 @@ When you run containers (e.g. in Docker), you usually run a system that has a wh
 
 The purpose of **minicon** is better understood with the use cases explained in depth in the section [Use Cases](#use-cases).
 
-1. **Basic Example ([direct link](#use-case-basic-example))**, that distributes only the set of tools, instead of distributing a whole Linux image. In this case the size is reduced from 123Mb. to about 8Mb.
-1. **Basic _user interface_ that need to access to other servers ([direct link](#use-case-basic-user-interface-ssh-cli-wget-vim))**. In this case we have reduced from 222Mb. to about 16Mb., and also we have made that the users only can use a reduced set of tools (ssh, ping, wget, etc.).
-1. **Node.JS+Express application ([direct link](#use-case-nodejsexpress-application))**: The size of the defaut NodeJS Docker image (i.e. node:latest), ready to run an application is about from 691MB. Applying **minicon** to that container, the size is reduced to about 45.4MB.
-1. **Use case: FFMPEG ([direct link](#use-case-ffmpeg))**: The size of a common _Ubuntu+FFMPEG_ image is about 387Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
+1. **Basic Example ([direct link](#use-case-basic-example))**, that distributes only the set of tools, instead of distributing a whole Linux image. In this case the size is reduced from 123Mb. to about 5.54Mb.
+1. **Basic _user interface_ that need to access to other servers ([direct link](#use-case-basic-user-interface-ssh-cli-wget))**. In this case we have reduced from 222Mb. to about 11Mb., and also we have made that the users only can use a reduced set of tools (ssh, ping, wget, etc.).
+1. **Node.JS+Express application ([direct link](#use-case-nodejsexpress-application))**: The size of the defaut NodeJS Docker image (i.e. node:latest), ready to run an application is about from 691MB. Applying **minicon** to that container, the size is reduced to about 45.3MB.
+1. **Use case: FFMPEG ([direct link](#use-case-ffmpeg))**: The size of a common _Ubuntu+FFMPEG_ image is about 388Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
 
 ## Why **minicon**?
 
@@ -150,6 +150,8 @@ To activate the strace plugin you can use the option ```--plugin```. Some exampl
 $ ./minicon -t tarfile --plugin=scripts ./minicon
 ```
 
+> **DISCLAIMER**: take into account that the _scripts_ plugin is an automated tool and tries to make its best. If a interpreter is detected, all the default include folder for that interpreter will be added to the final filesystem. If you know your app, you can reduce the number of folders to include. 
+
 ## Use Cases
 
 This section includes the whole process to re-produce two use cases in which **minicon** can reduce the footprint of the size of the Docker containers.
@@ -175,40 +177,40 @@ Digest: sha256:7c67a2206d3c04703e5c23518707bdd4916c057562dd51c74b99b2ba26af0f79
 Status: Downloaded newer image for ubuntu:latest
 $ docker images
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-ubuntu              latest              20c44cd7596f        2 weeks ago         123MB
+ubuntu              latest              20c44cd7596f        3 weeks ago         123MB
 ```
 
 A simple example will be to create a container that only contains a few commands (e.g. _bash_, _ls_, _mkdir_, etc.):
 
 ```bash
-$ docker run --rm -it -v $PWD:/tmp/minicon ubuntu:latest /tmp/minicon/minicon -t /tmp/minicon/minibash.tar bash ls mkdir less cat find
+$ docker run --rm -it -v $PWD:/tmp/minicon ubuntu:latest /tmp/minicon/minicon -t /tmp/minicon/usecases/uc1/uc1.tar bash ls mkdir less cat find
 [WARNING]  2017.12.05-12:45:24 disabling strace plugin because strace command is not available
 [WARNING]  2017.12.05-12:45:24 disabling scripts plugin because file command is not available
 ```
 
 Then you can import the container in Docker and check the difference of sizes:
 ```bash
-$ docker import minibash.tar ubuntu:minibash
-sha256:e4b5fa4f772d47b19ebe41544c52fd6c048a5a5d5abcac1d1e1efc30e3237025
+$ docker import usecases/uc1/uc1.tar minicon:uc1
+sha256:267c7ff2b27eabaaf931e5b0a7948c6545c176737cc2953bb030a696ef42d83d
 $ docker images
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-ubuntu              minibash            e4b5fa4f772d        20 seconds ago      9.44MB
-ubuntu              latest              20c44cd7596f        2 weeks ago         123MB
+minicon             uc1                 267c7ff2b27e        Less than a second ago   5.54MB
+ubuntu              latest              20c44cd7596f        3 weeks ago         123MB
 ```
 
 The size has been reduced dramatically, but **of course** you only have the requested files inside the container.
 
 ```bash
-$ tar tf minibash.tar 
-$ docker run --rm -it ubuntu:minibash find /bin /lib /usr /lib64
-$ docker run --rm -it ubuntu:minibash ls /
+$ tar tf usecases/uc1/uc1.tar 
+$ docker run --rm -it minicon:uc1 find /bin /lib /usr /lib64
+$ docker run --rm -it minicon:uc1 ls /
 ```
 
 <details>
  <summary>Click to show the whole execution (for verification purposes).</summary>
 
 ```bash
-$ tar tf minibash.tar 
+$ tar tf usecases/uc1/uc1.tar 
 ./
 ./bin/
 ./bin/cat
@@ -239,7 +241,7 @@ $ tar tf minibash.tar
 ./lib64/
 ./lib64/ld-linux-x86-64.so.2
 ./dev/
-$ docker run --rm -it ubuntu:minibash find /bin /lib /usr /lib64
+$ docker run --rm -it minicon:uc1 find /bin /lib /usr /lib64
 /bin
 /bin/cat
 /bin/ls
@@ -266,16 +268,16 @@ $ docker run --rm -it ubuntu:minibash find /bin /lib /usr /lib64
 /usr/bin/find
 /lib64
 /lib64/ld-linux-x86-64.so.2
-$ docker run --rm -it ubuntu:minibash ls /
+$ docker run --rm -it minicon:uc1 ls /
 bin  dev  etc  lib  lib64  proc  sys  tmp  usr
 ```
 </details>
 
-### Use Case: Basic User Interface (SSH Cli, wget, vim)
+### Use Case: Basic User Interface (SSH Cli, wget)
 
 In this use case we are building a basic user interface for the users, that need to access to other servers. The users will need commands like _ssh_, _wget_, _ping_, etc.
 
-In the general case, we will use a Dockerfile like the next one:
+In the general case, we will use a Dockerfile like the next one (in folder ./usecases/uc2):
 
 ```Dockerfile
 FROM ubuntu
@@ -285,27 +287,27 @@ RUN apt-get update && apt-get install -y ssh iproute2 iputils-ping wget
 And we will build using the next command:
 
 ```bash
-$ docker build . -t basic-ui
+$ docker build ./usecases/uc2/. -t minicon:uc2fat
 ```
 
-Now we have the container image called ```basic-ui``` that will serve for our purposes. We can inspect its size:
+Now we have the container image called ```minicon:uc2fat``` that will serve for our purposes. We can inspect its size:
 
 ```bash
 $ docker images
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-basic-ui            latest              58acd895d8d1        2 minutes ago       222MB
+minicon             uc2fat              2a95d52068fd        2 minutes ago       222MB
 ```
 
 But we can reduce the size, if we know which tools we want to provide to our users. From the folder in which it is installed **minicon**, we can execute the following commands to minimize the container and to import it into docker:
 
 ```
-$ cat > ./execfile-cmd << EOF
+$ cat > usecases/uc2/execfile-cmd << EOF
 ssh localhost
 /usr/bin/ssh localhost
 /bin/ping -c 1 www.google.es
 EOF
-$ docker run --privileged --rm -it -v $PWD:/tmp/minicon basic-ui bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/basic-ui-min.tar -l --plugin=strace:execfile=/tmp/minicon/execfile-cmd bash ssh ip id cat ls mkdir ping wget'
-$ docker import basic-ui-min.tar basic-ui:lean
+$ docker run --privileged --rm -it -v $PWD:/tmp/minicon minicon:uc2fat bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/usecases/uc2/uc2.tar -l --plugin=strace:execfile=/tmp/minicon/usecases/uc2/execfile-cmd bash ssh ip id cat ls mkdir ping wget'
+$ docker import usecases/uc2/uc2.tar minicon:uc2
 ```
 
 > In this case we needed to use the plugin _strace_ to guess which files are needed for the applications. E.g. the libraries for DNS resolution, configuration files, etc. So we created some simple examples of commandlines for some of the applications that we are including in the container.
@@ -315,21 +317,21 @@ And now we have a container with a very reduced size:
 ```
 $ docker images
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-basic-ui            lean                21e481217b6c        8 seconds ago       16MB
-basic-ui            latest              58acd895d8d1        7 minutes ago       222MB
+minicon             uc2                 9d8e0cacd383        Less than a second ago   10.8MB
+minicon             uc2fat              2a95d52068fd        2 minutes ago       222MB
 ```
 
-In this case we have reduced from 222Mb. to about 16Mb., and also we have made that the users only can use a reduced set of tools.
+In this case we have reduced from 222Mb. to about 11Mb., and also we have made that the users only can use a reduced set of tools.
 
 ### Use Case: Node.JS+Express application
-**TL;DR:** the image of a NodeJS+Express application can be reduced from 691MB (using the standard image of node; i.e. _node:latest_) to 45.4MB (just including the node environment).
+**TL;DR:** the image of a NodeJS+Express application can be reduced from 691MB (using the standard image of node; i.e. _node:latest_) to 45.3MB (just including the node environment).
 
 If you have a _NodeJS+Express_ application, it is possible to redistribute it using Docker.
 
 We can create a basic application using express (called _miniapp_):
 
 ```bash
-$ express miniapp$ express miniapp
+$ express ./usecases/uc3/miniapp
 
   warning: the default view engine will not be jade in future releases
   warning: use `--view=jade' or `--help' for additional options
@@ -361,18 +363,18 @@ RUN mkdir -p /usr/src/app
 WORKDIR /usr/src/app
 
 # Install app dependencies
-COPY package.json /usr/src/app/
+COPY miniapp/package.json /usr/src/app/
 RUN npm install
 
 # Bundle app source
-COPY . /usr/src/app
+COPY miniapp /usr/src/app
 
 EXPOSE 3000
 ```
 
 And now we can build the application and run it:
 ```bash
-$ docker build . -t miniapp
+$ docker build ./usecases/uc3 -t minicon:uc3fat
 Sending build context to Docker daemon  7.218MB
 Step 1/8 : FROM node:latest
  ---> c1d02ac1d9b4
@@ -381,23 +383,23 @@ Step 8/8 : CMD npm start
  ---> Using cache
  ---> feb69da10e8b
 Successfully built feb69da10e8b
-Successfully tagged miniapp:latest
-$ docker run --rm -it -w /usr/src/app -p 3000:3000 miniapp node bin/www
+Successfully tagged miniapp:uc3fat
+$ docker run --rm -it -w /usr/src/app -p 3000:3000 minicon:uc3fat node bin/www
 ```
 
-From other terminal you can chech that it is possible to get the contents
+From other terminal you can check that it is possible to get the contents
 ```bash
 $ curl -o- http://localhost:3000
 <!DOCTYPE html><html><head><title>Express</title><link rel="stylesheet" href="/stylesheets/style.css"></head><body><h1>Express</h1><p>Welcome to Express</p></body></html>
 ```
 
-If you inspect the size of the miniapp image, you will see something like the next:
+If you inspect the size of the built image, you will see something like the next:
 
 ```bash
 $ docker images
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+minicon             uc3fat              80168974cfa4        4 minutes ago       685MB
 node                latest              c1d02ac1d9b4        13 days ago         676MB
-miniapp             latest              feb69da10e8b        43 minutes ago      691MB
 ```
 
 The _node:latest_ image contains a whole debian distribution, but we only want to run a NodeJS+Express application
@@ -412,16 +414,16 @@ We are using **minicon** to strip out any other things but the files that we nee
 
 And now run **minicon** to get only de files needed (take into account that now we need the interpreter (node) and the app folder (i.e. /usr/src/app)):
 ```
-root@2ed82c5454a9:/tmp/minicon# ./minicon -l -t miniapp.tar node /usr/src/app
+root@2ed82c5454a9:/tmp/minicon# ./minicon -l -t /tmp/minicon/usecases/uc3/uc3.tar node /usr/src/app
 [WARNING] 2017.11.29-18:15:18 disabling strace plugin because strace command is not available
 root@2ed82c5454a9:/tmp/minicon# exit
 ```
 
 And finally we can create the container that only contains the NodeJS interpreter and our NodeJS+Express application:
 ```
-~/minicon$ docker import miniapp.tar miniapp:lean
-sha256:82624eebfc0b0b9f7cdb9959c8d372ccf06573f94578d4ef717f463a70f5fcb7
-~/minicon$ docker run --rm -it -w /usr/src/app -p 3000:3000 miniapp:lean node bin/www
+~/minicon$ docker import usecases/uc3/uc3.tar minicon:uc3
+sha256:73f77fa9fca0192e843523e6fb12c5bdcb79fb85768de751435dbfe642a4b611
+~/minicon$ docker run --rm -it -w /usr/src/app -p 3000:3000 minicon:uc3 node bin/www
 ```
 
 And it is possible to interact with the application.
@@ -431,19 +433,19 @@ The difference comes when you check the size of the new image compared to the pr
 ```bash
 $ docker images
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-miniapp             lean                82624eebfc0b        5 minutes ago       45.4MB
+minicon             uc3                 73f77fa9fca0        Less than a second ago   45.3MB
+minicon             uc3fat              80168974cfa4        4 minutes ago       685MB
 node                latest              c1d02ac1d9b4        13 days ago         676MB
-miniapp             latest              feb69da10e8b        43 minutes ago      691MB
 ```
 
-In this case we have reduced the size of the container from 691MB to 45.4MB.
+In this case we have reduced the size of the container from 691MB to 45.3MB.
 
 ### Use case: FFMPEG
-**TL;DR:** The size of a common _Ubuntu+FFMPEG_ image is about 387Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
+**TL;DR:** The size of a common _Ubuntu+FFMPEG_ image is about 388Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
 
 Imagine that you want to run the latest version of the app _ffmpeg_ to convert your video files. The usual way to proceed will consist of
 
-1. Creating a Docker file with a content like the next one:
+1. Creating a Docker file with a content like the next one (located in ```./usecases/uc4```):
 
 ```Dockerfile
 FROM ubuntu
@@ -453,13 +455,13 @@ RUN apt-get -y update && apt-get -y install ffmpeg
 2. Building the container
 
 ```bash
-$ docker build . -t ubuntu:ffmpeg
+$ docker build . -t minicon:uc4fat
 ```
 
 3. Run the application
 
 ```bash
-$ docker run --rm -it -v /myvideos:/tmp/myvideos ubuntu:ffmpeg ffmpeg /tmp/myvideos ...
+$ docker run --rm -it -v /myvideos:/tmp/myvideos minicon:uc4fat ffmpeg /tmp/myvideos ...
 ```
 
 This usual procedure is ok, but if you take a look at the size of the image, you will find something like the next:
@@ -467,57 +469,43 @@ This usual procedure is ok, but if you take a look at the size of the image, you
 ```bash
 $ docker images
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-ubuntu              ffmpeg              816069cb64a1        5 days ago          387MB
-ubuntu              latest              2fa927b5cdd3        18 months ago       122MB
+minicon             uc4fat              1ce54cdefdce        Less than a second ago   388MB
+ubuntu              latest              20c44cd7596f        3 weeks ago         123MB
 ```
 
 The problem is that in the image ```ubuntu:ffmpeg``` you have both _ffmpeg_ and the whole _ubuntu:latest_ base operating system. You will not run any other app appart from _ffmpeg_ (i.e. you do not need _mount_, _ssh_, _tar_, _rm_, etc.), but they are there:
 
 ```bash
-$ docker run --rm -it ubuntu:ffmpeg ls -l /bin
-total 7360
--rwxr-xr-x 1 root root 1037464 Aug 31  2015 bash
--rwxr-xr-x 1 root root   52080 Feb 18  2016 cat
--rwxr-xr-x 1 root root   60272 Feb 18  2016 chgrp
--rwxr-xr-x 1 root root   56112 Feb 18  2016 chmod
--rwxr-xr-x 1 root root   64368 Feb 18  2016 chown
--rwxr-xr-x 1 root root  151024 Feb 18  2016 cp
+$ docker run --rm -it minicon:uc4fat ls -l /bin
+total 7364
+-rwxr-xr-x 1 root root 1037528 May 16  2017 bash
+-rwxr-xr-x 1 root root   52080 Mar  2  2017 cat
+-rwxr-xr-x 1 root root   60272 Mar  2  2017 chgrp
+-rwxr-xr-x 1 root root   56112 Mar  2  2017 chmod
+-rwxr-xr-x 1 root root   64368 Mar  2  2017 chown
+-rwxr-xr-x 1 root root  151024 Mar  2  2017 cp
 -rwxr-xr-x 1 root root  154072 Feb 17  2016 dash
--rwxr-xr-x 1 root root   68464 Feb 18  2016 date
--rwxr-xr-x 1 root root   72632 Feb 18  2016 dd
--rwxr-xr-x 1 root root   97912 Feb 18  2016 df
--rwxr-xr-x 1 root root  126584 Feb 18  2016 dir
--rwxr-xr-x 1 root root   60680 Apr 13  2016 dmesg
+-rwxr-xr-x 1 root root   68464 Mar  2  2017 date
+-rwxr-xr-x 1 root root   72632 Mar  2  2017 dd
+-rwxr-xr-x 1 root root   97912 Mar  2  2017 df
+-rwxr-xr-x 1 root root  126584 Mar  2  2017 dir
+-rwxr-xr-x 1 root root   60680 Jun 14 21:51 dmesg
 lrwxrwxrwx 1 root root       8 Nov 24  2015 dnsdomainname -> hostname
 lrwxrwxrwx 1 root root       8 Nov 24  2015 domainname -> hostname
--rwxr-xr-x 1 root root   31376 Feb 18  2016 echo
--rwxr-xr-x 1 root root      28 Apr  5  2016 egrep
+-rwxr-xr-x 1 root root   31376 Mar  2  2017 echo
+-rwxr-xr-x 1 root root      28 Apr 29  2016 egrep
 ...
 ```
 
 **minicon** can reduce the footprint of the filesystem by only including the application _ffmpeg_ and those libraries and files needed by _ffmpeg_.
 
 #### Stripping all the unneeded files
-From the **minicon** commandline you can start a container that has the _ffmpeg_ application, and map the **minicon** folder:
+From the **minicon** commandline you can start a container that has the _ffmpeg_ application, start the minimization of the filesystem by issuing the next command:
 
 ```bash
-$ docker run --rm -it -v $PWD:/tmp/minicon ubuntu:ffmpeg bash
-```
-
-There you will get to the shell inside the container. And now you can start the minimization of the filesystem by issuing the next command:
-
-```
-root@c41b836e6f77:/# /tmp/minicon/minicon --ldconfig --tarfile /tmp/minicon/miniffmpeg.tar ffmpeg
+$ docker run --rm -it -v $PWD:/tmp/minicon minicon:uc4fat /tmp/minicon/minicon --ldconfig --tarfile /tmp/minicon/usecases/uc4/uc4.tar ffmpeg 
 [WARNING] 2017.11.29-15:30:47 disabling strace plugin because strace command is not available
 [WARNING] 2017.11.29-15:30:47 disabling scripts plugin because file command is not available
-root@c41b836e6f77:/# exit
-user@ubuntu:~/minicon$ ls -l
-total 116116
--rw-rw-r-- 1 user     user     11357 nov 29 15:20 LICENSE
--rwxrwxr-x 1 user     user     11988 nov 29 16:30 minicon
--rwxrwxr-x 1 user     user      2418 nov 29 16:08 minicondocker
--rw-r--r-- 1 root     root     118886400 nov 29 16:30 miniffmpeg.tar
--rw-rw-r-- 1 user     user      3408 nov 29 16:31 README.md
 ```
 
 The result is that you have a tar file that contains a filesystem that only includes _ffmpeg_ and the libraries needed to run it.
@@ -525,9 +513,9 @@ The result is that you have a tar file that contains a filesystem that only incl
 Now you can import the filesystem into Docker and run _ffmpeg_ but this time from the new minified container:
 
 ```
-user@ubuntu:~/minicon$ docker import miniffmpeg.tar ffmpeg:mini
+user@ubuntu:~/minicon$ docker import usecases/uc4/uc4.tar minicon:uc4
 sha256:3eac8bc3a29bcffb462b1b24dbd6377b4f94b009b18a1846dd83022beda7e3f8
-user@ubuntu:~/minicon$ docker run --rm -it ffmpeg:mini ffmpeg
+user@ubuntu:~/minicon$ docker run --rm -it minicon:uc4 ffmpeg
 ffmpeg version 2.8.11-0ubuntu0.16.04.1 Copyright (c) 2000-2017 the FFmpeg developers
   built with gcc 5.4.0 (Ubuntu 5.4.0-6ubuntu1~16.04.4) 20160609
   configuration: --prefix=/usr --extra-version=0ubuntu0.16.04.1 --build-suffix=-ffmpeg --toolchain=hardened --libdir=/usr/lib/x86_64-linux-gnu --incdir=/usr/include/x86_64-linux-gnu --cc=cc --cxx=g++ --enable-gpl --enable-shared --disable-stripping --disable-decoder=libopenjpeg --disable-decoder=libschroedinger --enable-avresample --enable-avisynth --enable-gnutls --enable-ladspa --enable-libass --enable-libbluray --enable-libbs2b --enable-libcaca --enable-libcdio --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libgsm --enable-libmodplug --enable-libmp3lame --enable-libopenjpeg --enable-libopus --enable-libpulse --enable-librtmp --enable-libschroedinger --enable-libshine --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libssh --enable-libtheora --enable-libtwolame --enable-libvorbis --enable-libvpx --enable-libwavpack --enable-libwebp --enable-libx265 --enable-libxvid --enable-libzvbi --enable-openal --enable-opengl --enable-x11grab --enable-libdc1394 --enable-libiec61883 --enable-libzmq --enable-frei0r --enable-libx264 --enable-libopencv
@@ -551,9 +539,9 @@ You can verify that the footprint of the container has been reduced:
 ```bash
 $ docker images
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-ubuntu              ffmpeg              816069cb64a1        5 days ago          387MB
-ubuntu              latest              2fa927b5cdd3        18 months ago       122MB
-ffmpeg              mini                3eac8bc3a29b        About a minute ago   119MB
+minicon             uc4                 c3ae3608e431        1 second ago        119MB
+minicon             uc4fat              1ce54cdefdce        Less than a second ago   388MB
+ubuntu              latest              20c44cd7596f        3 weeks ago         123MB
 ```
 
-The size of the common _Ubuntu+FFMPEG_ image is about 387Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
+The size of the common _Ubuntu+FFMPEG_ image is about 388Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.

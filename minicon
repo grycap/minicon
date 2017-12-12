@@ -216,7 +216,12 @@ function copy() {
   # copies one file (or folder) to the same destination in the root filesystem
   # - it does not overwrite contents
   local SRC="$1"
-  local FILE="$2"
+
+  if [ "$SRC" == "." -o "$SRC" == ".." ]; then
+    p_warning "cowardly refusing to copy folder $SRC"
+    return
+  fi
+
   local DST
   if [ "$VERBOSE" == "true" ]; then
     p_info "  processing $SRC... "
@@ -224,21 +229,28 @@ function copy() {
   if [ ! -e "$SRC" ]; then
     p_error 1 "failed to read $SRC"
   fi
-  if [ "$FILE" != "" ]; then
-    mkdir -p "$(dirname "$ROOTFS/$FILE")"
-  fi
   local SRCDIR="$(dirname "$SRC")"
   DST="$ROOTFS/$SRCDIR"
   mkdir -p "$DST"
-  if [ "$FILE" != "" ]; then
-    echo "$SRCDIR" >> "$ROOTFS/$FILE"
-  fi
   p_debug "  copying $SRC to $DST"
   if [ -d "$SRC" ]; then
     cp -n -r "$SRC" "$DST"
   else
     cp -n "$SRC" "$DST"
   fi
+}
+
+# Credits fot this function go to https://stackoverflow.com/a/18898782
+# Return relative path from canonical absolute dir path $1 to canonical
+# absolute dir path $2 ($1 and/or $2 may end with one or no "/").
+# Does only need POSIX shell builtins (no external command)
+function relPath () {
+    local common path up
+    common=${1%/} path=${2%/}/
+    while test "${path#"$common"/}" = "$path"; do
+        common=${common%/*} up=../$up
+    done
+    path=$up${path#"$common"/}; path=${path%/}; printf %s "${path:-.}"
 }
 
 function is_plugin_active() {
@@ -271,7 +283,41 @@ function plugin_parameter() {
   return 1
 }
 
-function PLUGIN_00_folder() {
+function PLUGIN_00_link() {
+  # If the path is a link to other path, we will create the link and analyze the real path
+  local L_PATH="$1"
+
+  if [ -h "$L_PATH" ]; then
+    local L_DST="$ROOTFS/$(dirname "$L_PATH")"
+    local R_PATH="$(readlink -f "$L_PATH")"
+    local R_DST="$ROOTFS/$(dirname "$R_PATH")"
+    mkdir -p "$L_DST"
+
+    if [ ! -e "$L_DST/$(basename $L_PATH)" ]; then
+      local REL_PATH="$(relPath "$L_DST" "$R_DST")"
+      p_debug "$L_PATH is a link to $REL_PATH/$(basename $R_PATH)"
+      ln -s $REL_PATH/$(basename $R_PATH) $L_DST/$(basename $L_PATH)
+    fi
+
+    add_command "$R_PATH"
+    return 1
+  fi
+}
+
+function PLUGIN_01_which() {
+  # This plugin tries to guess whether the command to analize is in the path or not.
+  # If the command can be obtained calling which, we'll analyze the actual command and not the short name.
+  local S_PATH="$1"
+  local W_PATH="$(which $S_PATH)"
+
+  if [ "$W_PATH" != "" -a "$W_PATH" != "$S_PATH" ]; then
+    p_debug "$1 is $W_PATH"
+    add_command "$W_PATH"
+    return 1
+  fi
+}
+
+function PLUGIN_02_folder() {
   # If it is a folder, just copy it to its location in the new FS
   local S_PATH="$1"
 
@@ -289,6 +335,7 @@ function PLUGIN_09_ldd() {
   local S_PATH="$1"
   local LIBS= LIB=
   local COMMAND="$(which -- $S_PATH)"
+  local LIB_DIR=
   if [ "$COMMAND" == "" ]; then
     COMMAND="$S_PATH"
   fi
@@ -304,7 +351,12 @@ function PLUGIN_09_ldd() {
   if [ $? -eq 0 ]; then
     LIBS="$(ldd "$COMMAND" | grep -v 'linux-vdso' | grep -v 'statically' | sed 's/^[ \t]*//g' | sed 's/^.* => //g' | sed 's/(.*)//' | sed '/^[ ]*$/d')"
     for LIB in $LIBS; do
-      copy "$LIB" "$LDCONFIGGILE"
+      # Here we build the ld config file to add the new paths where the libraries are located
+      if [ "$LDCONFIGFILE" != "" ]; then
+        LIB_DIR="$(dirname "$LIB")"
+        mkdir -p "$ROOTFS/$(dirname $LDCONFIGFILE)"
+        echo "$LIB_DIR" >> "$ROOTFS/$LDCONFIGFILE"
+      fi
       add_command "$LIB"
     done
   fi
@@ -465,7 +517,8 @@ function PLUGIN_11_scripts() {
   #  If it is, adds the interpreter to the list of commands to add to the container
   p_debug "trying to guess if $1 is a interpreted script"
 
-  local S_PATH="$(which -- $1)"
+  local S_PATH="$(which $1)"
+  local ADD_PATHS=
 
   if [ "$S_PATH" == "" ]; then
     p_warning "$1 cannot be executed (if it should, please check the path)"
@@ -477,15 +530,25 @@ function PLUGIN_11_scripts() {
   FILE_RES="${FILE_RES,,}"
   local SHELL_EXEC=
   case "$FILE_RES" in
-    python) SHELL_EXEC=$(which python);;
+    python) SHELL_EXEC=$(which python)
+            ADD_PATHS="$(python -c 'import sys;print "\n".join(sys.path)' | grep -v '/home')";;
     "bourne-again shell") SHELL_EXEC=$(which bash);;
-    "a /usr/bin/perl") SHELL_EXEC=$(which perl);;
+    "a /usr/bin/perl")  SHELL_EXEC=$(which perl)
+                        ADD_PATHS="$(perl -e "print qq(@INC)" | tr ' ' '\n' | grep -v '/home')";;
   esac
 
   # If we found a known interpreter, we'll add to the list of dependencies
   if [ "$SHELL_EXEC" != "" ]; then
     p_debug "found that $S_PATH needs $SHELL_EXEC"
     add_command "$SHELL_EXEC"
+  fi
+  # The include folders
+  if [ "$ADD_PATHS" != "" ]; then
+    p_debug "found that $S_PATH needs $ADD_PATHS"
+    local P
+    while read P; do
+      add_command "$P"
+    done <<< "$ADD_PATHS"
   fi
   return 0
 }
@@ -504,7 +567,7 @@ function plugin_list() {
 }
 
 # Now we are activating the basic plugins
-PLUGINS_ACTIVATED=folder,ldd
+PLUGINS_ACTIVATED=link,which,folder,ldd
 COMMANDS_TO_ADD=()
 FORCEFOLDER=false
 ROOTFS=
@@ -533,7 +596,7 @@ while [ $n -lt ${#ARR[@]} ]; do
         --quiet|-q)             QUIET=true;;
         --tarfile|-t)           n=$(($n+1))
                                 TARFILE="${ARR[$n]}";;
-        --ldconfig|-l)          LDCONFIGGILE=/etc/ld.so.conf;;
+        --ldconfig|-l)          LDCONFIGFILE=/etc/ld.so.conf;;
         --verbose|-v)           VERBOSE=true;;
         --debug)                DEBUG=true;;
         --force|-f)             FORCEFOLDER=true;;
@@ -606,8 +669,11 @@ while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do
   i_current=$(($i_current+1))
 done
 
-if [ "$LDCONFIGGILE" != "" -a -e "$ROOTFS/$LDCONFIGGILE" ]; then
+if [ "$LDCONFIGFILE" != "" -a -e "$ROOTFS/$LDCONFIGFILE" ]; then
   p_debug "creating ldconfig"
+  TMPFILE=$(tempfile)
+  awk '!a[$0]++' "$ROOTFS/$LDCONFIGFILE" > "$TMPFILE"
+  mv "$TMPFILE" "$ROOTFS/$LDCONFIGFILE"
   ldconfig -r "$ROOTFS"
 fi
 

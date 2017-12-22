@@ -1,17 +1,25 @@
-# minicon - MINImization of the filesystems for CONtainers
+# Manipulation of Container Filesystems
+
+This file explains [**minicon**](#1-minicon---minimization-of-the-filesystems-for-containers) and [**mergecon**](#2-mergecon---merge-container-filesystems):
+
+1. **minicon** ([direct link](#1-minicon---minimization-of-the-filesystems-for-containers)) aims at reducing the footprint of the filesystem for the container, just adding those files that are needed. That means that the other files in the original container are removed.
+
+1. **mergecon** ([direct link](#2-mergecon---merge-container-filesystems)) is a tool that merges the filesystems of two different container images. It creates a new container image that is built from the combination of the layers of the filesystems of the input containers.
+
+# 1. minicon - MINImization of the filesystems for CONtainers
 
 When you run containers (e.g. in Docker), you usually run a system that has a whole Operating System and your specific application. The result is that the footprint of the container is bigger than needed.
 
 **minicon** aims at reducing the footprint of the filesystem for the container, just adding those files that are needed. That means that the other files in the original container are removed.
 
-The purpose of **minicon** is better understood with the use cases explained in depth in the section [Use Cases](#use-cases).
+The purpose of **minicon** is better understood with the use cases explained in depth in the section [Use Cases](#14-use-cases).
 
 1. **Basic Example ([direct link](#use-case-basic-example))**, that distributes only the set of tools, instead of distributing a whole Linux image. In this case the size is reduced from 123Mb. to about 5.54Mb.
 1. **Basic _user interface_ that need to access to other servers ([direct link](#use-case-basic-user-interface-ssh-cli-wget))**. In this case we have reduced from 222Mb. to about 11Mb., and also we have made that the users only can use a reduced set of tools (ssh, ping, wget, etc.).
 1. **Node.JS+Express application ([direct link](#use-case-nodejsexpress-application))**: The size of the defaut NodeJS Docker image (i.e. node:latest), ready to run an application is about from 691MB. Applying **minicon** to that container, the size is reduced to about 45.3MB.
 1. **Use case: FFMPEG ([direct link](#use-case-ffmpeg))**: The size of a common _Ubuntu+FFMPEG_ image is about 388Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
 
-## Why **minicon**?
+## 1.1 Why **minicon**?
 
 Reducing the footprint of one container is of special interest, to redistribute the container images.
 
@@ -21,7 +29,7 @@ But there are also security reasons to minimize the unneeded application or envi
 
 In this sense, the recent publication of the NIST "[Application Container Security Guide](https://doi.org/10.6028/NIST.SP.800-190)" suggests that "_An image should only include the executables and libraries required by the app itself; all other OS functionality is provided by the OS kernel within the underlying host OS_".
 
-## Installation
+## 1.2 Installation
 
 **minicon** is a bash script that tries to analize an application (or a set of applications) using other tools such as _ldd_ or _strace_. So you just simply need to have a working linux with bash installed and get the code:
 
@@ -35,7 +43,7 @@ In that folder you'll have the **minicon** application. I would suggest to put i
 $ mv minicon /opt
 ```
 
-### Dependencies
+### 1.2.1 Dependencies
 
 **minicon** depends on the commands _ldd_, _file_, _strace_ and _tar_. So, you need to install the proper packages in your system.
 
@@ -49,7 +57,7 @@ $ apt-get install libc-bin tar file strace
 ```bash
 $ yum install glibc-common tar file strace
 ```
-## Usage
+## 1.3 Usage
 
 **minicon** has a lot of options. You are advised to run ```./minicon --help``` to get the latest information about the usage of the application.
 
@@ -68,7 +76,7 @@ Some options are:
 - **--verbose | -v**: Gives more information about the procedure.
 - **--debug**: Gives a lot more information about the procedure.
 
-### Usage in containers
+### 1.3.1 Usage of minicon in containers
 **minicon** is very interesting for container images. You will probably have a container image that you will probably want to minimize. In this case, you should prepare a Dockerfile to ensure that you install the dependencies of **minicon**.
 
 ```Dockerfile
@@ -95,7 +103,7 @@ $ docker import mycontainer_minimized.tar mycontainer:minimized
 $ docker run -it mycontainer:minimized bash
 ```
 
-### Plug-ins
+### 1.3.2 Plug-ins
 
 **minicon** includes two important plugins in the default distribution: _strace_ and _scripts_:
 
@@ -152,7 +160,7 @@ $ ./minicon -t tarfile --plugin=scripts ./minicon
 
 > **DISCLAIMER**: take into account that the _scripts_ plugin is an automated tool and tries to make its best. If a interpreter is detected, all the default include folder for that interpreter will be added to the final filesystem. If you know your app, you can reduce the number of folders to include. 
 
-## Use Cases
+## 1.4 Use Cases
 
 This section includes the whole process to re-produce two use cases in which **minicon** can reduce the footprint of the size of the Docker containers.
 
@@ -545,3 +553,67 @@ ubuntu              latest              20c44cd7596f        3 weeks ago         
 ```
 
 The size of the common _Ubuntu+FFMPEG_ image is about 388Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
+
+# 2. mergecon - MERGE CONtainer filesystems
+
+Docker containers are built from different layers, and **mergecon** is a tool that merges the filesystems of two different container images. It creates a new container image that is built from the combination of the layers of the filesystems of the input containers.
+
+## 2.1 Why mergecon?
+
+If you create a minimal application filesystem (i.e. using **minicon**), you will be able to run your application, but you will not have any other application available for (e.g.) debugging your application.
+
+Using **mergecon**, you will be able to overlay the files of your container image to other existing container image. In this way, you can overlay your **minicon** resulting application over a whole **ubuntu:latest** container. The effect is that you will have the support of a whole operating environment over the minimal container.
+
+### 2.1.2 Other use cases
+1. Even getting the resulting image by applying **minicon** over an **ubuntu:latest** derived container, you can overlay such image over an **alpine:latest** image (or other). The effect is that you will have your application over an **alpine** host. This is of interest in case that you want to run GNU applications over non-GNU systems(e.g. alpine).
+
+1. If you have an application that needs to be compiled and installed, you can create a one-liner installation, and combine that layer with other container. That means that you will be able to compile such image in (e.g.) ubuntu, and create a final container with other flavor (e.g. CentOS).
+
+## 2.2 Installation
+
+**mergecon** is a bash script that deals with **docker** commands. **mergecon** is part of the **minicon** package, and so you just simply need to have a working linux with bash installed and get the code:
+
+```bash
+$ git clone https://github.com/grycap/minicon
+```
+
+In that folder you'll have the **mergecon** application. I would suggest to put it in the _/opt_ folder. Otherwise leave it in a folder of your choice:
+
+```bash
+$ mv minicon /opt
+```
+
+### 2.2.1 Dependencies
+
+**merge** depends on the commands _tar_ and _jq_. So, you need to install the proper packages in your system. 
+
+**Ubuntu**
+
+```bash
+$ apt-get install tar jq
+```
+
+**CentOS**
+```bash
+$ yum install tar jq
+```
+## 2.3 Usage
+
+**mergecon** has a lot of options. You are advised to run ```./mergecon --help``` to get the latest information about the usage of the application.
+
+The basic syntax is
+
+```bash
+$ ./mergecon <options> 
+```
+
+Some options are:
+- **--first | -1 <image>**: Name of the first container image (will use docker save to dump it)
+- **--second | -2 <image>**: Name of the second container image (will use docker save to dump it) the default behaviour gives more priority to the second image. I.e. in case of overlapping files in both input images, the files in the second image will be exposed to the final image.
+- **--name | -n <name>**: Name of the resulting container image. If not provided, the resulting name will be the concatenation of the names of the two input images: <image1>:<image2> (the : in the input image names is removed).
+- **--working | -w <folder>**: Working folder. If not provided will create a temporary folder in /tmp
+- **--list | -l**: Lists the layers in the images (useful for filesystem composition).
+- **--file | -f <file>**: tar file where the resulting image will be created. If not provided, the image will be loaded into docker.
+- **--keeptemporary | -k**: Keeps the temporary folder. Otherwise, the folder is removed (if it is created by mergecon).
+- **--verbose | -v**: Gives more information about the procedure.
+- **--debug**: Gives a lot more information about the procedure.

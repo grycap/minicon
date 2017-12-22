@@ -554,8 +554,10 @@ $INTERPRETER
   fi
 
   case "$(basename "$INTERPRETER")" in
-    perl) ADD_PATHS="${ADD_PATHS}$(perl -e "print qq(@INC)" | tr ' ' '\n' | grep -v -e '^/home' -e '^\.')";;
-    python) ADD_PATHS="${ADD_PATHS}$(python -c 'import sys;print "\n".join(sys.path)' | grep -v -e '^/home' -e '^\.')";;
+    perl) ADD_PATHS="${ADD_PATHS}
+$(perl -e "print qq(@INC)" | tr ' ' '\n' | grep -v -e '^/home' -e '^\.')";;
+    python) ADD_PATHS="${ADD_PATHS}
+$(python -c 'import sys;print "\n".join(sys.path)' | grep -v -e '^/home' -e '^\.')";;
     bash) ;;
     python) ;;
     *)    p_warning "interpreter $INTERPRETER not recognised"

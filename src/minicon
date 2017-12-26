@@ -1,0 +1,295 @@
+#!/bin/bash
+#
+# minicon - Minimization of filesystems for containers
+# https://github.com/grycap/minicon
+#
+# Copyright (C) GRyCAP - I3M - UPV 
+# Developed by Carlos A. caralla@upv.es
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+function usage() {
+  cat <<EOF
+minicon aims at reducing the footprint of the filesystem for the container, just adding those 
+  files that are needed. That means that the other files in the original container are removed.
+
+$0 <option> <executables to analyze, files or folders to include>
+
+  --rootfs | -r       Create the filesystem in a specific folder.
+  --tar-file | -t     Generate a tar file that contains the resulting filesystem. This is
+                      ideal to import it into docker using the command "docker import". If 
+                      not specified the --rootfs parameter, minicon will use a temporary 
+                      folder.
+  --exclude | -e <F>  Exclude all paths that begin with 'F' (it accepts texts for regular expressions)
+  --ldconfig | -l     Generate a /etc/ldconfig.so file, adjusted to the new filesystem. 
+                      It is suggested to always use this flag, to set the proper path to the
+                      libraries included in the new filesystem.
+  --plugin            Activates some plugins and sets the options for them. The syntax is
+                      --plugin=<plugin name>:<parameter>=<value>:<parameter>=<value>...
+  --plugin-all        Activates all the available plugins, using their default options.
+  --logfile | -g <F>  Outputs the information in file F instead of stdout and stderr
+  --quiet | -q        Makes the tasks silently
+  --verbose | -v      Shows more information about the procedure.
+  --debug             Shows a lot more information about the procedure.
+  --help | -h         Shows this help and exits.
+
+  Examples:
+    # The next execution will try to execute the application bash for 3 seconds 
+    # (the default value), but will exclude any file used by the application that 
+    # is found either in /dev or /proc
+
+    $ ./minicon -t tarfile --plugin=strace --exclude /dev --exclude /proc bash
+
+    # The next execution will create a minimal container filesystem that only contains
+    # bash, ls and mkdir. The result can be imported in Docker using the command
+    # (e.g.) docker import minicont.tar test:mini
+    $ docker run --rm --plugin-all -it -v \$PWD:/tmp/minicon \\
+      ubuntu:latest /tmp/minicon/minicon -l -t minicont.tar bash ls mkdir
+EOF
+}
+
+# Checking dependencies
+function remove_from_plugins() {
+  local P="$1"
+  local PP=
+
+  while [ "$PP" != "$PLUGINS_ACTIVATED" ]; do
+    PP="$PLUGINS_ACTIVATED"
+    PLUGINS_ACTIVATED="$(echo "$PLUGINS_ACTIVATED" | sed "s/\(^\|,\)\($P\(\|:[^,]*\)\)\(,\|$\)/\1\4/g")"
+  done
+}
+
+function verify_dependencies() {
+  if ! strace -V > /dev/null 2> /dev/null; then
+    remove_from_plugins "strace"
+    p_warning "disabling strace plugin because strace command is not available"
+  fi
+  if ! file --version > /dev/null 2> /dev/null; then
+    remove_from_plugins "scripts"
+    p_warning "disabling scripts plugin because file command is not available"
+  fi
+  if [ "$TARFILE" != "" ]; then
+    if ! tar --version > /dev/null 2> /dev/null; then
+      finalize 1 "tar command is needed to create tar files"
+    fi
+  fi
+  if ! ldd --version > /dev/null 2> /dev/null; then
+    finalize 1 "ldd command is needed for scripts plugin"
+  fi
+}
+
+source lib/debug.bash
+source lib/temp.bash
+source lib/config.bash
+source plugins.bash
+
+function copy() {
+  # copies one file (or folder) to the same destination in the root filesystem
+  # - it does not overwrite contents
+  local SRC="$1"
+  local n EP
+
+  for ((n=0;n<${#EXCLUDED_PATHS[@]};n++)); do
+    EP="${EXCLUDED_PATHS[$n]}"
+    if [[ "$SRC" =~ ^$EP ]]; then
+      p_warning "excluding ${SRC} because it matches pattern ${EP}"
+      return 0
+    fi
+  done
+
+  if [ "$SRC" == "." -o "$SRC" == ".." ]; then
+    p_warning "cowardly refusing to copy folder $SRC"
+    return
+  fi
+
+  local DST
+  if [ "$VERBOSE" == "true" ]; then
+    p_info "  processing $SRC... "
+  fi
+  if [ ! -e "$SRC" ]; then
+    p_error 1 "failed to read $SRC"
+  fi
+  local SRCDIR="$(dirname "$SRC")"
+  DST="$ROOTFS/$SRCDIR"
+  mkdir -p "$DST"
+  p_debug "  copying $SRC to $DST"
+  p_out "$SRC"
+  if [ -d "$SRC" ]; then
+    cp -n -r "$SRC" "$DST"
+  else
+    cp -n "$SRC" "$DST"
+  fi
+}
+
+# Credits fot this function go to https://stackoverflow.com/a/18898782
+# Return relative path from canonical absolute dir path $1 to canonical
+# absolute dir path $2 ($1 and/or $2 may end with one or no "/").
+# Does only need POSIX shell builtins (no external command)
+function relPath () {
+    local common path up
+    common=${1%/} path=${2%/}/
+    while test "${path#"$common"/}" = "$path"; do
+        common=${common%/*} up=../$up
+    done
+    path=$up${path#"$common"/}; path=${path%/}; printf %s "${path:-.}"
+}
+
+function is_plugin_active() {
+  # Checks whether a plugin is activated or not
+  if [[ "$PLUGINS_ACTIVATED" =~ (^|,)$1(|:[^,]+)(,|$) ]]; then
+    return 0
+  fi  
+  return 1
+}
+
+function add_command() {
+  local CMDTOADD="$1"
+  local n=0
+  local ALREADY_EXISTS=false
+  while [ $n -lt ${#COMMANDS_TO_ADD[@]} ]; do
+    if [ "$CMDTOADD" == "${COMMANDS_TO_ADD[$n]}" ]; then
+      ALREADY_EXISTS=true
+      break
+    fi
+    n=$((n+1))
+  done
+  if [ "$ALREADY_EXISTS" == "false" ]; then
+    p_debug "need to analyze $CMDTOADD"
+    COMMANDS_TO_ADD+=( "$CMDTOADD" )
+  fi
+}
+
+# Now we are activating the basic plugins
+EXCLUDED_PATHS=()
+PLUGINS_ACTIVATED=link,which,folder,ldd,scripts
+COMMANDS_TO_ADD=()
+FORCEFOLDER=false
+ROOTFS=
+n=0
+while [ $# -gt 0 ]; do
+    if [ "${1:0:1}" == "-" -a "${1:1:1}" != "-" -a "${1:1:1}" != "" ]; then
+        for f in $(echo "${1:1}" | sed 's/\(.\)/-\1 /g' ); do
+            ARR[$n]="$f"
+            n=$(($n+1))
+        done
+    else
+        ARR[$n]="$1"
+        n=$(($n+1))
+    fi
+    shift
+done
+
+n=0
+while [ $n -lt ${#ARR[@]} ]; do
+    PARAM="${ARR[$n]}"
+    case "$PARAM" in
+        --plugin-all)           PLUGINS_ACTIVATED="$(plugin_list),${PLUGINS_ACTIVATED}";;
+        --plugin=*)             PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED},${PARAM:9}";;
+        --exclude|-e)           n=$(($n+1))
+                                EXCLUDED_PATHS+=("${ARR[$n]}");;
+        --logfile|-g)           n=$(($n+1))
+                                LOGFILE="${ARR[$n]}";;
+        --quiet|-q)             QUIET=true;;
+        --tarfile|-t)           n=$(($n+1))
+                                TARFILE="${ARR[$n]}";;
+        --ldconfig|-l)          LDCONFIGFILE=/etc/ld.so.conf;;
+        --verbose|-v)           VERBOSE=true;;
+        --debug)                DEBUG=true;;
+        --force|-f)             FORCEFOLDER=true;;
+        --rootfs|-r)            n=$(($n+1))
+                                ROOTFS="${ARR[$n]}"
+                                if [ ! -d "$(dirname $ROOTFS)" ]; then
+                                  finalize 1 "invalid folder (parent folder must exist)"
+                                fi;;
+        --help | -h)            usage && finalize;;
+        --|*)                   [ "$PARAM" == "--" ] && n=$(($n+1))
+                                while [ $n -lt ${#ARR[@]} ]; do
+                                  PARAM="${ARR[$n]}"
+                                  COMMANDS_TO_ADD+=("$PARAM")
+                                  n=$(($n+1))
+                                done;;
+    esac
+    n=$(($n+1))
+done
+
+[ "$QUIET" == "true" ] && DEBUG= VERBOSE=
+
+if [ "$TARFILE" != "" -a "$ROOTFS" == "" ]; then
+  ROOTFS=$(tempdir)
+  FORCEFOLDER=true
+fi
+
+[ "$ROOTFS" == "" ] && finalize 1 "you must provide a folder (--rootfs) to create the root filesystem or request a tar file (--tarfile)"
+
+ROOTFS="$(readlink -f "$ROOTFS")"
+[ "$ROOTFS" == "" ] && finalize 1 "invalid folder to create the root filesystem (the parent folder MUST exist)"
+
+DANGER_FOLDERS="/ /etc /var /sys /proc"
+for F in $DANGER_FOLDERS; do
+  [ "$ROOTFS" == "$F" ] && finalize "refusing to build root filesystem in folder $ROOTFS"
+done
+  
+[ -e "$ROOTFS" -a ! -d "$ROOTFS" ] && finalize 1 "$ROOTFS exists but it is not a folder"
+
+if [ "$FORCEFOLDER" != "true" -a -d "$ROOTFS" ]; then
+  read -p "folder for root filesystem ($ROOTFS) already exists. Are you sure to use it? (y/N) " CONFIRM
+  if [ "${CONFIRM^^}" != "Y" ]; then
+    finalize 1 "aborting"
+  fi
+fi
+
+# Check dependencies first
+verify_dependencies
+
+p_debug "creating $ROOTFS"
+mkdir -p "$ROOTFS"
+mkdir -p "$ROOTFS/tmp"
+mkdir -p "$ROOTFS/dev"
+mkdir -p "$ROOTFS/proc"
+
+i_current=0
+while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do
+  CURRENT_CMD="${COMMANDS_TO_ADD[$i_current]}"
+  for p in $(PLUGIN_funcs); do
+    if is_plugin_active "${p##*_}"; then
+      p_debug "invoking plugin ${p##*_}"
+      _C_PLUGIN="${p##*_}"
+      set_logger "${_C_PLUGIN^^}"
+      if ! $p "$CURRENT_CMD"; then
+        break
+      fi 
+      set_logger
+    fi
+  done
+  set_logger
+  i_current=$(($i_current+1))
+done
+
+if [ "$LDCONFIGFILE" != "" -a -e "$ROOTFS/$LDCONFIGFILE" ]; then
+  p_debug "creating ldconfig"
+  TMPFILE=$(tempfile)
+  awk '!a[$0]++' "$ROOTFS/$LDCONFIGFILE" > "$TMPFILE"
+  mv "$TMPFILE" "$ROOTFS/$LDCONFIGFILE"
+  ldconfig -r "$ROOTFS"
+  p_out "ldconfig recreated"
+fi
+
+if [ "$TARFILE" != "" ]; then
+  if [ "$TARFILE" != "-" ]; then
+    p_info "producing tar file $TARFILE"
+    tar cf "$TARFILE" -C "$ROOTFS" .
+  else
+    tar c -C "$ROOTFS" .
+  fi
+fi

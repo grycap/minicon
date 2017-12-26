@@ -1,0 +1,180 @@
+#!/bin/bash
+function p_errfile() {
+  if [ "$LOGFILE" == "" ]; then
+    echo "$@" >&2
+  else
+    touch -f "$LOGFILE"
+    if [ $? -eq 0 ]; then
+      echo "$@" >> "$LOGFILE"
+    fi
+  fi
+}
+
+function p_error() {
+  local O_STR="[ERROR] $LOGGER $(date +%Y.%m.%d-%X) $@"
+  p_errfile "$O_STR"
+}
+
+function p_warning() {
+  local O_STR="[WARNING] $LOGGER $(date +%Y.%m.%d-%X) $@"
+  p_errfile "$O_STR"
+}
+
+function p_info() {
+  local L
+  if [ "$VERBOSE" == "true" ]; then
+    local TS="$(date +%Y.%m.%d-%X)"
+    while read L; do
+      p_errfile "[INFO] $LOGGER $TS $@"
+    done <<< "$@"
+  fi
+}
+
+function p_out() {
+  if [ "$QUIET" != "true" ]; then
+    while read L; do
+      echo "$@"
+    done <<< "$@"
+  fi
+}
+
+function p_debug() {
+  local L
+  if [ "$DEBUG" == "true" ]; then
+    local TS="$(date +%Y.%m.%d-%X)"
+    while read L; do
+      p_errfile "[DEBUG] $LOGGER $TS $L"
+    done <<< "$@"
+  fi
+}
+
+function set_logger() {
+  if [ "$1" != "" ]; then
+    LOGGER="[$1]"
+  else
+    LOGGER=
+  fi
+}
+
+function finalize() {
+  # Finalizes the execution of the this script and shows an error (if provided)
+  local ERR=$1
+  shift
+  local COMMENT=$@
+  [ "$ERR" == "" ] && ERR=0
+  [ "$COMMENT" != "" ] && p_error "$COMMENT"
+  if [ "$KEEPTEMPORARY" != "true" ]; then
+    p_debug removing temporary folder "$TMPDIR"
+    rm -rf "$TMPDIR"
+  fi  
+  exit $ERR
+}
+
+function trim() {
+  shopt -s extglob
+  local A="${1##+([[:space:]])}"
+  A="${A%%+([[:space:]])}"
+  shopt -u extglob
+  echo "$A"
+}
+
+function sanitize() {
+  echo "$1" | sed -e 's/\([[\/.*]\|\]\)/\\&/g'
+}
+
+n=0
+while [ $# -gt 0 ]; do
+    if [ "${1:0:1}" == "-" -a "${1:1:1}" != "-" -a "${1:1:1}" != "" ]; then
+        for f in $(echo "${1:1}" | sed 's/\(.\)/-\1 /g' ); do
+            ARR[$n]="$f"
+            n=$(($n+1))
+        done
+    else
+        ARR[$n]="$1"
+        n=$(($n+1))
+    fi
+    shift
+done
+
+TMPDIR=
+OUTFILE=
+FILETOJOIN=
+n=0
+while [ $n -lt ${#ARR[@]} ]; do
+    PARAM="${ARR[$n]}"
+    case "$PARAM" in
+        --file|-f)              n=$(($n+1))
+                                OUTFILE="${ARR[$n]}";;
+        --skipmissing|-s)       SKIPMISSING=true;;
+        --onlyonce|-o)          ONLYONCE=true;;
+        --verbose|-v)           VERBOSE=true;;
+        --debug)                DEBUG=true;;
+        --help | -h)            usage && finalize;;
+        *)                      if [ "$FILETOJOIN" == "" ]; then
+                                  FILETOJOIN="$PARAM"
+                                else
+                                  finalize 1 "already stated file $FILETOJOIN"
+                                fi;;
+    esac
+    n=$(($n+1))
+done
+
+if [ "$FILETOJOIN" == "" ]; then
+  finalize 0 "no input file provided"
+fi
+
+_FILES_INCLUDED=()
+_TMPFILE1="$(tempfile)"
+cp "$FILETOJOIN" "$_TMPFILE1"
+HAVEWORK=true
+
+while [ "$HAVEWORK" == "true" ]; do
+  _NXT_SRC="$(cat "$_TMPFILE1" | sed 's/#.*//g' | sed 's/^[ \t]*//g' | sed 's/[ \t]*$//g' | sed '/^$/d' | grep '^source ' | head -n 1)"
+  if [ "$_NXT_SRC" != "" ]; then
+    _SRC_FILE="$(trim "${_NXT_SRC:7}")"
+
+    if [ -e "$_SRC_FILE" ]; then
+      SOLVEINCLUDE=true
+      FILEINCLUDED="$(echo "${_FILES_INCLUDED[@]}" | grep "$_SRC_FILE")"
+      if [ "$FILEINCLUDED" != "" ]; then
+        if [ "$ONLYONCE" == "true" ]; then
+          p_warning "file $_SRC_FILE has already been included"
+          SOLVEINCLUDE=false
+        fi
+      fi
+      _TMPFILE2=$(tempfile)
+      if [ "$SOLVEINCLUDE" == "true" ]; then
+        p_debug "including file $_SRC_FILE"
+        _CONTROLFIELD="$(cat /proc/sys/kernel/random/uuid)"
+        sed -e "0,/^$(sanitize "$_NXT_SRC")\$/s//$_CONTROLFIELD/"  -e "/$_CONTROLFIELD/ {
+        r $_SRC_FILE
+        a
+        d
+        }" "$_TMPFILE1" > "$_TMPFILE2" 
+        _FILES_INCLUDED+=("$_SRC_FILE")
+      else
+        p_debug "skipping file $_SRC_FILE"
+        cat "$_TMPFILE1" | sed "s/^\\($(sanitize "$_NXT_SRC")\\)\$/# Already included: \\1/" > "$_TMPFILE2"
+      fi
+    else
+      p_warning "could not find file $_SRC_FILE"
+      if [ "$SKIPMISSING" == "true" ]; then
+        cat "$_TMPFILE1" | sed "s/^\\($(sanitize "$_NXT_SRC")\\)\$/# Missing file: \\1/" > "$_TMPFILE2"
+      else
+        finalize 1 "could not find file $_SRC_FILE"
+      fi
+    fi
+    mv "$_TMPFILE2" "$_TMPFILE1"
+  else
+    HAVEWORK=false
+  fi
+done
+
+if [ "$OUTFILE" == "" ]; then
+  cat "$_TMPFILE1"
+else
+  mv "$_TMPFILE1" "$OUTFILE"
+fi
+
+exit 
+source ending

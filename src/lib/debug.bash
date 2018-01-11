@@ -1,4 +1,19 @@
+_MUTED_EXPRESSIONS=()
+
+function p_mute() {
+  _MUTED_EXPRESSIONS+=("${1// /[[:space:]]}")
+}
+
 function p_errfile() {
+  local i
+  local E
+  for ((i=0;i<${#_MUTED_EXPRESSIONS[@]};i=i+1)); do
+    E="${_MUTED_EXPRESSIONS[$i]}"
+    if [[ "$1" =~ ^$E ]]; then
+      return 0
+    fi
+  done
+
   if [ "$LOGFILE" == "" ]; then
     echo "$@" >&2
   else

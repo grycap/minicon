@@ -43,6 +43,11 @@ $0 <option> <executables to analyze, files or folders to include>
   --verbose | -v      Shows more information about the procedure.
   --debug             Shows a lot more information about the procedure.
   --help | -h         Shows this help and exits.
+  --execution | -E <cmdline>
+                      Execution to analyze (you can include a whole execution between quotes).
+                      This is specially useful for the strace plugin. In other case, the effect
+                      will be the same of including the command from the execution in the executables
+                      to analyze.
 
   Examples:
     # The next execution will try to execute the application bash for 3 seconds 
@@ -89,8 +94,23 @@ function verify_dependencies() {
   fi
 }
 
-# Functions to output information depending on the configuration
+# declare -a _MUTED_EXPRESSIONS=(".*[[:space:]]was[[:space:]]used" ".*[[:space:]]invoking[[:space:]]plugin[[:space:]].*" ".*[[:space:]]copying[[:space:]].*")
+_MUTED_EXPRESSIONS=()
+
+function p_mute() {
+  _MUTED_EXPRESSIONS+=("${1// /[[:space:]]}")
+}
+
 function p_errfile() {
+  local i
+  local E
+  for ((i=0;i<${#_MUTED_EXPRESSIONS[@]};i=i+1)); do
+    E="${_MUTED_EXPRESSIONS[$i]}"
+    if [[ "$1" =~ ^$E ]]; then
+      return 0
+    fi
+  done
+
   if [ "$LOGFILE" == "" ]; then
     echo "$@" >&2
   else
@@ -147,35 +167,6 @@ function set_logger() {
   fi
 }
 
-function tempfile {
-  # Creates a unique temporary file
-  RES=$(/bin/tempfile 2> /dev/null)
-  if [ $? -ne 0 ]; then
-    RES=$(mktemp 2> /dev/null)
-    while [ $? -ne 0 ]; do
-      RES=/tmp/ftemp_${RANDOM}_$(date +%s)
-      touch $RES
-    done
-  fi
-  echo $RES
-}
-
-function tempdir() {
-  # Creates a unique temporary folder
-  local RES
-  RES=$(/bin/tempfile 2> /dev/null)
-  if [ $? -ne 0 ]; then
-    RES=$(mktemp -d 2> /dev/null)
-    while [ $? -ne 0 ]; do
-      RES=/tmp/ftemp_${RANDOM}_$(date +%s)
-      mkdir -p $RES
-    done
-  else
-    rm -f "$RES" && mkdir -p "$RES"
-  fi
-  echo $RES
-}
-
 function finalize() {
   # Finalizes the execution of the this script and shows an error (if provided)
   local ERR=$1
@@ -189,7 +180,40 @@ function finalize() {
   fi  
   exit $ERR
 }
+function tempfile {
+  local FOLDER="$1"
+  if [ "$FOLDER" == "" ]; then
+    FOLDER=/tmp
+  fi
+  if [ ! -d "$FOLDER" ]; then
+    finalize 1 "folder $FOLDER does not exist"
+  fi
+  RES=$FOLDER/ftemp_${RANDOM}_$(date +%s)
+  touch $RES
+  while [ $? -ne 0 ]; do
+    RES=$FOLDER/ftemp_${RANDOM}_$(date +%s)
+    touch $RES
+  done
+  echo $RES
+}
 
+function tempdir() {
+  # Creates a unique temporary folder
+  local FOLDER="$1"
+  if [ "$FOLDER" == "" ]; then
+    FOLDER=/tmp
+  fi
+  if [ ! -d "$FOLDER" ]; then
+    finalize 1 "folder $FOLDER does not exist"
+  fi
+  RES=$FOLDER/ftemp_${RANDOM}_$(date +%s)
+  mkdir -p $RES 2> /dev/null
+  while [ $? -ne 0 ]; do
+    RES=$FOLDER/ftemp_${RANDOM}_$(date +%s)
+    mkdir -p $RES 2> /dev/null
+  done
+  echo $RES
+}
 # Reads a configuration file and set its variables (removes comments, blank lines, trailing spaces, etc. and
 # then reads KEY=VALUE settings)
 function readconf() {
@@ -219,66 +243,6 @@ function readconf() {
   done <<< "$_TXT_CONF"
   return 0
 }
-
-function copy() {
-  # copies one file (or folder) to the same destination in the root filesystem
-  # - it does not overwrite contents
-  local SRC="$1"
-  local n EP
-
-  for ((n=0;n<${#EXCLUDED_PATHS[@]};n++)); do
-    EP="${EXCLUDED_PATHS[$n]}"
-    if [[ "$SRC" =~ ^$EP ]]; then
-      p_warning "excluding ${SRC} because it matches pattern ${EP}"
-      return 0
-    fi
-  done
-
-  if [ "$SRC" == "." -o "$SRC" == ".." ]; then
-    p_warning "cowardly refusing to copy folder $SRC"
-    return
-  fi
-
-  local DST
-  if [ "$VERBOSE" == "true" ]; then
-    p_info "  processing $SRC... "
-  fi
-  if [ ! -e "$SRC" ]; then
-    p_error 1 "failed to read $SRC"
-  fi
-  local SRCDIR="$(dirname "$SRC")"
-  DST="$ROOTFS/$SRCDIR"
-  mkdir -p "$DST"
-  p_debug "  copying $SRC to $DST"
-  p_out "$SRC"
-  if [ -d "$SRC" ]; then
-    cp -n -r "$SRC" "$DST"
-  else
-    cp -n "$SRC" "$DST"
-  fi
-}
-
-# Credits fot this function go to https://stackoverflow.com/a/18898782
-# Return relative path from canonical absolute dir path $1 to canonical
-# absolute dir path $2 ($1 and/or $2 may end with one or no "/").
-# Does only need POSIX shell builtins (no external command)
-function relPath () {
-    local common path up
-    common=${1%/} path=${2%/}/
-    while test "${path#"$common"/}" = "$path"; do
-        common=${common%/*} up=../$up
-    done
-    path=$up${path#"$common"/}; path=${path%/}; printf %s "${path:-.}"
-}
-
-function is_plugin_active() {
-  # Checks whether a plugin is activated or not
-  if [[ "$PLUGINS_ACTIVATED" =~ (^|,)$1(|:[^,]+)(,|$) ]]; then
-    return 0
-  fi  
-  return 1
-}
-
 function plugin_parameter() {
   # Gets the value of a parameter passed to a plugin
   #   the format is: <plugin>:<param1>=<value1>:<param2>=<value2>...
@@ -301,25 +265,60 @@ function plugin_parameter() {
   return 1
 }
 
+function _linked_file() {
+  local L_PATH="$1"
+
+  # Special cases that we do not want to handle
+  if [ "$L_PATH" == "." -o "$L_PATH" == ".." ]; then
+    echo "$L_PATH"
+    return
+  fi
+
+  local R_PATH="$(readlink -f -- "$1")"
+
+  # If the actual file (readlink) is not the same than the original file, it can be supposed that
+  # the original file had a link at some point in the path but it is not necessarily a link (e.g. 
+  # /var/run -> /run ... /var/run/s6 will be /run/r6, but the link is at the middle).
+  if [ "$R_PATH" != "" -a "$L_PATH" != "$R_PATH" ]; then
+
+    # If the file itself is a link, we need to create such link
+    if [ -h "$L_PATH" ]; then
+      local L_DST="$ROOTFS/$(dirname "$L_PATH")"
+  
+      if [ ! -e "$L_DST/$(basename $L_PATH)" ]; then
+        local R_DST="$ROOTFS/$(dirname "$R_PATH")"
+
+        # TODO: need to revise permission when creating this path... permissions for the folder but
+        # also the intermediate folders.
+        mkdir -p "$L_DST" 2> /dev/null
+        local REL_PATH="$(relPath "$L_DST" "$R_DST")"
+        p_debug "$L_PATH is a link to $REL_PATH/$(basename $R_PATH)"
+        ln -s $REL_PATH/$(basename $R_PATH) $L_DST/$(basename $L_PATH)
+      fi
+    fi
+
+    if [ -e "$R_PATH" ]; then
+      p_debug "$L_PATH -> $R_PATH"
+      echo "$R_PATH"
+    else
+      p_debug "$L_PATH -> ???"
+      echo "$L_PATH"
+    fi
+  else
+    echo "$L_PATH"
+  fi
+}
+
 function PLUGIN_00_link() {
   # If the path is a link to other path, we will create the link and analyze the real path
   local L_PATH="$1"
 
-  if [ -h "$L_PATH" ]; then
-    local L_DST="$ROOTFS/$(dirname "$L_PATH")"
-    local R_PATH="$(readlink -f "$L_PATH")"
-    local R_DST="$ROOTFS/$(dirname "$R_PATH")"
-    mkdir -p "$L_DST"
-
-    if [ ! -e "$L_DST/$(basename $L_PATH)" ]; then
-      local REL_PATH="$(relPath "$L_DST" "$R_DST")"
-      p_debug "$L_PATH is a link to $REL_PATH/$(basename $R_PATH)"
-      ln -s $REL_PATH/$(basename $R_PATH) $L_DST/$(basename $L_PATH)
-    fi
-
-    add_command "$R_PATH"
+  local L_PATH="$(_linked_file "$1")"
+  if [ "$L_PATH" != "$1" ]; then
+    add_command "$L_PATH"
     return 1
   fi
+  return 0
 }
 
 function PLUGIN_01_which() {
@@ -382,23 +381,6 @@ function PLUGIN_09_ldd() {
   copy "$COMMAND"
 }
 
-function add_command() {
-  local CMDTOADD="$1"
-  local n=0
-  local ALREADY_EXISTS=false
-  while [ $n -lt ${#COMMANDS_TO_ADD[@]} ]; do
-    if [ "$CMDTOADD" == "${COMMANDS_TO_ADD[$n]}" ]; then
-      ALREADY_EXISTS=true
-      break
-    fi
-    n=$((n+1))
-  done
-  if [ "$ALREADY_EXISTS" == "false" ]; then
-    p_debug "need to analyze $CMDTOADD"
-    COMMANDS_TO_ADD+=( "$CMDTOADD" )
-  fi
-}
-
 function arrayze_cmd() {
   # This function creates an array of parameters from a commandline. The special
   # function of this function is that sometimes parameters are between quotes and the
@@ -407,7 +389,7 @@ function arrayze_cmd() {
   local AN="$1"
   local _CMD="$2"
   local R n=0
-  declare -g -n $AN
+  declare -g -a -n $AN
   while read R; do
     read ${AN}[n] <<< "$R"
     n=$((n+1))
@@ -416,20 +398,49 @@ function arrayze_cmd() {
 
 function analyze_strace_strings() {
   local STRINGS="$1"
-  local S
+  local S _S
   while read S; do
     S="${S:1:-1}"
-    if [ "$S" != "" -a "${S::1}" != "-" ]; then
-      S="$(readlink -e -- ${S})"
-      if [ "$S" != "" -a -e "$S" -a ! -d "$S" -a -f "$S" ]; then
-        p_debug "file $S was used"
-        echo "$S"
+    if [ "$S" != "!" ]; then
+      if [ "$S" != "" -a "${S::1}" != "-" -a -e "$S" ]; then
+        _S="$(readlink -e -- ${S})"
+        if [ "$_S" != "" -a -e "$_S" ]; then
+          if [ -f "$_S" -o -d "$_S" ]; then
+            p_debug "file $S was used"
+            echo "$S"
+          fi
+        fi
       fi
     fi
   done <<< "$STRINGS"
 }
 
-function PLUGIN_10_strace() {
+_ALREADY_STRACED=()
+
+function MARK_straced() {
+  _ALREADY_STRACED+=("$1")
+}
+
+# MARK_straced "/etc/s6/services/.s6-svscan/finish"
+
+function already_straced() {
+  local i
+  for ((i=0;i<${#_ALREADY_STRACED[@]};i=i+1)); do
+    if [ "${_ALREADY_STRACED[$i]}" == "$1" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+function _strace_exec() {  
+  if already_straced "${COMMAND[@]}"; then
+    p_debug "command ${COMMAND[@]} already straced"
+    return
+  fi
+
+  MARK_straced "${COMMAND[@]}"
+
   # Execute the app without any parameter, using strace and see which files does it open 
   local SECONDSSIM=$(plugin_parameter "strace" "seconds")
   if [[ ! $SECONDSSIM =~ ^[0-9]*$ ]]; then
@@ -438,6 +449,46 @@ function PLUGIN_10_strace() {
   if [ "$SECONDSSIM" == "" ]; then
     SECONDSSIM=3
   fi
+
+  p_info "analysing ${COMMAND[@]} using strace and $SECONDSSIM seconds"
+
+  local TMPFILE=$(tempfile)
+  {
+    timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" "${COMMAND[@]}" > /dev/null 2> /dev/null
+  } > /dev/null 2> /dev/null
+
+  # Now we'll inspect the files that the execution has used
+  local FUNCTIONS
+  local STRINGS
+  local L BN
+
+  FUNCTIONS="open|mkdir"
+  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  while read L; do
+    if [ "$L" != "" ]; then
+      BN="$(basename $L)"
+      # add_command "$L"
+      if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
+        add_command "$L"
+      else
+        copy "$L"
+      fi
+    fi
+  done <<< "$(analyze_strace_strings "$STRINGS")"
+
+  FUNCTIONS="exec.*"
+  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  while read L; do
+    [ "$L" != "" ] && add_command "$L"
+  done <<< "$(analyze_strace_strings "$STRINGS")"
+
+  rm "$TMPFILE"
+
+  copy "${COMMAND[0]}"
+}
+
+function PLUGIN_10_strace() {
+  # Execute the app without any parameter, using strace and see which files does it open 
 
   # A file that contains examples of calls for the commands to be considered (e.g. this is because
   # some commands will not perform any operation if they do not have parameters; e.g. echo)
@@ -449,8 +500,6 @@ function PLUGIN_10_strace() {
     p_debug "cannot analize $S_PATH using strace"
     return 0
   fi
-
-  p_info "analysing command $COMMAND using strace and $SECONDSSIM seconds"
 
   # Let's see if there is a specific commandline (with parameters) for this command in the file
   local CMDTOEXEC CMDLINE
@@ -481,38 +530,38 @@ function PLUGIN_10_strace() {
     COMMAND=( ${CMDLINE[@]} )
   fi
 
-  local TMPFILE=$(tempfile)
-  {
-    timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" "${COMMAND[@]}" > /dev/null 2> /dev/null
-  } > /dev/null 2> /dev/null
+  _strace_exec
+}
 
-  # Now we'll inspect the files that the execution has used
-  local FUNCTIONS
-  local STRINGS
-  local L BN
+function STRACE_command() {
+  local CMDLINE
+  local COMMAND
 
-  FUNCTIONS="open"
-  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
-  while read L; do
-    if [ "$L" != "" ]; then
-      BN="$(basename $L)"
-      if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
-        add_command "$L"
-      else
-        copy "$L"
-      fi
+  arrayze_cmd CMDLINE "$1"
+  local _PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED}"
+
+  if [ "${CMDLINE[0]}" != "" ]; then
+    local S_PATH="${CMDLINE[0]}"
+    local OPTIONS="${S_PATH%,*}"
+    local N_PATH="${S_PATH##*,}"
+
+    if [ "$N_PATH" != "" -a "$OPTIONS" != "" ]; then
+      p_info "specific options to strace: $OPTIONS"
+      PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED},strace:${OPTIONS}"
+      S_PATH="$N_PATH"
     fi
-  done <<< "$(analyze_strace_strings "$STRINGS")"
 
-  FUNCTIONS="exec.*"
-  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
-  while read L; do
-    [ "$L" != "" ] && add_command "$L"
-  done <<< "$(analyze_strace_strings "$STRINGS")"
+    COMMAND="$(which -- $S_PATH)"
+    if [ "$COMMAND" == "" ]; then
+      p_debug "cannot analize $S_PATH using strace"
+      return 0
+    fi
+    CMDLINE[0]="$COMMAND"
+  fi
+  COMMAND=( ${CMDLINE[@]} )
+  _strace_exec
 
-  rm "$TMPFILE"
-
-  copy "$COMMAND"
+  PLUGINS_ACTIVATED="${_PLUGINS_ACTIVATED}"
 }
 
 function PLUGIN_11_scripts() {
@@ -587,10 +636,152 @@ function plugin_list() {
   echo
 }
 
+function is_protected() {
+  local SRC="$1"
+  local PROTECTED="/proc.*,/dev.*,/sys.*,/"
+  local CURRENT
+
+  while read -d ',' CURRENT; do
+    CURRENT="${CURRENT}\$"
+    if [[ "$SRC" =~ ^$CURRENT ]]; then
+      return 0
+    fi
+  done <<<"${PROTECTED},"
+  return 1
+}
+
+function _build_rsync() {
+  local CURRENT="$1"
+  local RES=
+  while [ "$CURRENT" != "/" ]; do
+    RES="--include ${CURRENT} ${RES}"
+    CURRENT="$(dirname "$CURRENT")"
+  done
+  local i
+  for ((i=0;i<${#EXCLUDED_PATHS[@]};i=i+1)); do
+    RES="${RES} --exclude ${EXCLUDED_PATHS[$i]} --exclude ${EXCLUDED_PATHS[$i]}/\*"
+  done
+  echo "$RES"
+}
+
+function cp_rsync() {
+  local SRC="$1"
+  local ROOTFS="$2"
+  local SRCDIR="$(dirname "$SRC")"
+  DST="$ROOTFS/$SRCDIR"
+
+  p_debug "  copying $SRC to $DST"
+  p_out "$SRC"
+  rsync -a $(_build_rsync "$SRCDIR") --include "${SRC}" --include "${SRC}/**" --exclude '*' / "$ROOTFS"
+}
+
+function cp_cp() {
+  local SRC="$1"
+  local ROOTFS="$2"
+  local DST=
+  DST="$ROOTFS/$(dirname "$SRC")"
+  mkdir -p "$DST"
+  
+  p_debug "  copying $SRC to $DST"
+  p_out "$SRC"
+  if [ -d "$SRC" ]; then
+    cp -p -n -r "$SRC" "$DST"
+  else
+    cp -p -n "$SRC" "$DST"
+  fi
+}
+
+if [ "$CP_FUNC" == "" ]; then
+  rsync --version 2> /dev/null > /dev/null
+  if [ $? -eq 0 ]; then
+    CP_FUNC=cp_rsync
+  else
+    p_warning "rsync is not available... some file permissions will be lost"
+    CP_FUNC=cp_cp
+  fi
+fi
+
+function copy() {
+  # copies one file (or folder) to the same destination in the root filesystem
+  # - it does not overwrite contents
+  local SRC="$1"
+  local n EP
+
+  # now check whether it is a link or not... if it is a link, we'll copy the actual file and will create the link
+  SRC="$(_linked_file "$SRC")"
+
+  if is_protected "$SRC"; then
+    p_info "excluding file $SRC because it is in a protected path"
+    return 0
+  fi
+
+  for ((n=0;n<${#EXCLUDED_PATHS[@]};n++)); do
+    EP="${EXCLUDED_PATHS[$n]}"
+    if [[ "$SRC" =~ ^$EP ]]; then
+      p_info "excluding ${SRC} because it matches pattern ${EP}"
+      return 0
+    fi
+  done
+
+  if [ "$SRC" == "." -o "$SRC" == ".." ]; then
+    p_warning "cowardly refusing to copy folder $SRC"
+    return
+  fi
+
+  local DST
+  if [ "$VERBOSE" == "true" ]; then
+    p_info "  processing $SRC... "
+  fi
+  if [ ! -e "$SRC" ]; then
+    p_error 1 "failed to read $SRC"
+  fi
+
+  $CP_FUNC "$SRC" "$ROOTFS"
+}
+
+# Credits fot this function go to https://stackoverflow.com/a/18898782
+# Return relative path from canonical absolute dir path $1 to canonical
+# absolute dir path $2 ($1 and/or $2 may end with one or no "/").
+# Does only need POSIX shell builtins (no external command)
+function relPath () {
+    local common path up
+    common=${1%/} path=${2%/}/
+    while test "${path#"$common"/}" = "$path"; do
+        common=${common%/*} up=../$up
+    done
+    path=$up${path#"$common"/}; path=${path%/}; printf %s "${path:-.}"
+}
+
+function is_plugin_active() {
+  # Checks whether a plugin is activated or not
+  if [[ "$PLUGINS_ACTIVATED" =~ (^|,)$1(|:[^,]+)(,|$) ]]; then
+    return 0
+  fi  
+  return 1
+}
+
+function add_command() {
+  local CMDTOADD="$1"
+  local n=0
+  local ALREADY_EXISTS=false
+  while [ $n -lt ${#COMMANDS_TO_ADD[@]} ]; do
+    if [ "$CMDTOADD" == "${COMMANDS_TO_ADD[$n]}" ]; then
+      ALREADY_EXISTS=true
+      break
+    fi
+    n=$((n+1))
+  done
+  if [ "$ALREADY_EXISTS" == "false" ]; then
+    p_debug "need to analyze $CMDTOADD"
+    COMMANDS_TO_ADD+=( "$CMDTOADD" )
+  fi
+}
+
 # Now we are activating the basic plugins
 EXCLUDED_PATHS=()
 PLUGINS_ACTIVATED=link,which,folder,ldd,scripts
 COMMANDS_TO_ADD=()
+EXECUTIONS=()
 FORCEFOLDER=false
 ROOTFS=
 n=0
@@ -629,18 +820,29 @@ while [ $n -lt ${#ARR[@]} ]; do
                                 if [ ! -d "$(dirname $ROOTFS)" ]; then
                                   finalize 1 "invalid folder (parent folder must exist)"
                                 fi;;
+        --execution|-E)         n=$(($n+1))
+                                EXECUTIONS+=("${ARR[$n]}");;
         --help | -h)            usage && finalize;;
-        --|*)                   [ "$PARAM" == "--" ] && n=$(($n+1))
+        --)                     n=$(($n+1))
                                 while [ $n -lt ${#ARR[@]} ]; do
                                   PARAM="${ARR[$n]}"
                                   COMMANDS_TO_ADD+=("$PARAM")
                                   n=$(($n+1))
                                 done;;
+        *)                      COMMANDS_TO_ADD+=("$PARAM");;
     esac
     n=$(($n+1))
 done
 
 [ "$QUIET" == "true" ] && DEBUG= VERBOSE=
+
+if [ ${#EXECUTIONS[@]} -gt 0 ]; then
+  for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
+    arrayze_cmd CURRENT_CMD "${EXECUTIONS[$n]}"
+    p_debug "adding command ${CURRENT_CMD[0]} to analyze"
+    COMMANDS_TO_ADD+=("${CURRENT_CMD[0]}")
+  done
+fi
 
 if [ "$TARFILE" != "" -a "$ROOTFS" == "" ]; then
   ROOTFS=$(tempdir)
@@ -674,6 +876,16 @@ mkdir -p "$ROOTFS"
 mkdir -p "$ROOTFS/tmp"
 mkdir -p "$ROOTFS/dev"
 mkdir -p "$ROOTFS/proc"
+
+p_mute ".* was used"
+p_mute ".* copying .*"
+# p_mute ".* invoking plugin .*"
+
+if is_plugin_active "strace"; then
+  for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
+    STRACE_command "${EXECUTIONS[$n]}"
+  done
+fi
 
 i_current=0
 while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do

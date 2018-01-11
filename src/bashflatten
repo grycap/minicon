@@ -99,10 +99,16 @@ done
 TMPDIR=
 OUTFILE=
 FILETOJOIN=
+WORKINGFOLDER=.
+PARAMS=()
 n=0
 while [ $n -lt ${#ARR[@]} ]; do
     PARAM="${ARR[$n]}"
     case "$PARAM" in
+        --execute|-e)           EXECUTE=true;;
+        --chdir|-c)             n=$(($n+1))
+                                WORKINGFOLDER="${ARR[$n]}";;
+        --chdir-to-file|-C)     CHDIRTOFILE=true;;
         --file|-f)              n=$(($n+1))
                                 OUTFILE="${ARR[$n]}";;
         --skipmissing|-s)       SKIPMISSING=true;;
@@ -110,11 +116,16 @@ while [ $n -lt ${#ARR[@]} ]; do
         --verbose|-v)           VERBOSE=true;;
         --debug)                DEBUG=true;;
         --help | -h)            usage && finalize;;
-        *)                      if [ "$FILETOJOIN" == "" ]; then
-                                  FILETOJOIN="$PARAM"
-                                else
-                                  finalize 1 "already stated file $FILETOJOIN"
-                                fi;;
+        --|*)                   [ "$PARAM" == "--" ] && n=$(($n+1))
+                                while [ $n -lt ${#ARR[@]} ]; do
+                                  PARAM="${ARR[$n]}"
+                                  if [ "$FILETOJOIN" == "" ]; then
+                                    FILETOJOIN="$PARAM"
+                                  else
+                                    PARAMS+=("$PARAM")       
+                                  fi                           
+                                  n=$(($n+1))
+                                done;;
     esac
     n=$(($n+1))
 done
@@ -122,6 +133,13 @@ done
 if [ "$FILETOJOIN" == "" ]; then
   finalize 0 "no input file provided"
 fi
+
+if [ "$CHDIRTOFILE" == "true" ]; then
+  WORKINGFOLDER="$(dirname "$FILETOJOIN")"
+  FILETOJOIN="$(basename "$FILETOJOIN")"
+fi
+
+cd "$WORKINGFOLDER" || finalize 1 "not valid working folder $WORKINGFOLDER"
 
 _FILES_INCLUDED=()
 _TMPFILE1="$(tempfile)"
@@ -170,11 +188,18 @@ while [ "$HAVEWORK" == "true" ]; do
   fi
 done
 
-if [ "$OUTFILE" == "" ]; then
-  cat "$_TMPFILE1"
-else
+if [ "$OUTFILE" != "" ]; then
   mv "$_TMPFILE1" "$OUTFILE"
+else
+  if [ "$EXECUTE" == "true" ]; then
+    OUTFILE="$_TMPFILE1"
+  else
+    cat "$_TMPFILE1"  
+  fi
 fi
 
-exit 
-source ending
+if [ "$EXECUTE" == "true" ]; then
+  bash -- "$OUTFILE" "${PARAMS[@]}"
+fi
+
+cd - > /dev/null

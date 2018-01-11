@@ -43,6 +43,11 @@ $0 <option> <executables to analyze, files or folders to include>
   --verbose | -v      Shows more information about the procedure.
   --debug             Shows a lot more information about the procedure.
   --help | -h         Shows this help and exits.
+  --execution | -E <cmdline>
+                      Execution to analyze (you can include a whole execution between quotes).
+                      This is specially useful for the strace plugin. In other case, the effect
+                      will be the same of including the command from the execution in the executables
+                      to analyze.
 
   Examples:
     # The next execution will try to execute the application bash for 3 seconds 
@@ -94,16 +99,89 @@ source lib/temp.bash
 source lib/config.bash
 source plugins.bash
 
+function is_protected() {
+  local SRC="$1"
+  local PROTECTED="/proc.*,/dev.*,/sys.*,/"
+  local CURRENT
+
+  while read -d ',' CURRENT; do
+    CURRENT="${CURRENT}\$"
+    if [[ "$SRC" =~ ^$CURRENT ]]; then
+      return 0
+    fi
+  done <<<"${PROTECTED},"
+  return 1
+}
+
+function _build_rsync() {
+  local CURRENT="$1"
+  local RES=
+  while [ "$CURRENT" != "/" ]; do
+    RES="--include ${CURRENT} ${RES}"
+    CURRENT="$(dirname "$CURRENT")"
+  done
+  local i
+  for ((i=0;i<${#EXCLUDED_PATHS[@]};i=i+1)); do
+    RES="${RES} --exclude ${EXCLUDED_PATHS[$i]} --exclude ${EXCLUDED_PATHS[$i]}/\*"
+  done
+  echo "$RES"
+}
+
+function cp_rsync() {
+  local SRC="$1"
+  local ROOTFS="$2"
+  local SRCDIR="$(dirname "$SRC")"
+  DST="$ROOTFS/$SRCDIR"
+
+  p_debug "  copying $SRC to $DST"
+  p_out "$SRC"
+  rsync -a $(_build_rsync "$SRCDIR") --include "${SRC}" --include "${SRC}/**" --exclude '*' / "$ROOTFS"
+}
+
+function cp_cp() {
+  local SRC="$1"
+  local ROOTFS="$2"
+  local DST=
+  DST="$ROOTFS/$(dirname "$SRC")"
+  mkdir -p "$DST"
+  
+  p_debug "  copying $SRC to $DST"
+  p_out "$SRC"
+  if [ -d "$SRC" ]; then
+    cp -p -n -r "$SRC" "$DST"
+  else
+    cp -p -n "$SRC" "$DST"
+  fi
+}
+
+if [ "$CP_FUNC" == "" ]; then
+  rsync --version 2> /dev/null > /dev/null
+  if [ $? -eq 0 ]; then
+    CP_FUNC=cp_rsync
+  else
+    p_warning "rsync is not available... some file permissions will be lost"
+    CP_FUNC=cp_cp
+  fi
+fi
+
 function copy() {
   # copies one file (or folder) to the same destination in the root filesystem
   # - it does not overwrite contents
   local SRC="$1"
   local n EP
 
+  # now check whether it is a link or not... if it is a link, we'll copy the actual file and will create the link
+  SRC="$(_linked_file "$SRC")"
+
+  if is_protected "$SRC"; then
+    p_info "excluding file $SRC because it is in a protected path"
+    return 0
+  fi
+
   for ((n=0;n<${#EXCLUDED_PATHS[@]};n++)); do
     EP="${EXCLUDED_PATHS[$n]}"
     if [[ "$SRC" =~ ^$EP ]]; then
-      p_warning "excluding ${SRC} because it matches pattern ${EP}"
+      p_info "excluding ${SRC} because it matches pattern ${EP}"
       return 0
     fi
   done
@@ -120,16 +198,8 @@ function copy() {
   if [ ! -e "$SRC" ]; then
     p_error 1 "failed to read $SRC"
   fi
-  local SRCDIR="$(dirname "$SRC")"
-  DST="$ROOTFS/$SRCDIR"
-  mkdir -p "$DST"
-  p_debug "  copying $SRC to $DST"
-  p_out "$SRC"
-  if [ -d "$SRC" ]; then
-    cp -n -r "$SRC" "$DST"
-  else
-    cp -n "$SRC" "$DST"
-  fi
+
+  $CP_FUNC "$SRC" "$ROOTFS"
 }
 
 # Credits fot this function go to https://stackoverflow.com/a/18898782
@@ -174,6 +244,7 @@ function add_command() {
 EXCLUDED_PATHS=()
 PLUGINS_ACTIVATED=link,which,folder,ldd,scripts
 COMMANDS_TO_ADD=()
+EXECUTIONS=()
 FORCEFOLDER=false
 ROOTFS=
 n=0
@@ -212,18 +283,29 @@ while [ $n -lt ${#ARR[@]} ]; do
                                 if [ ! -d "$(dirname $ROOTFS)" ]; then
                                   finalize 1 "invalid folder (parent folder must exist)"
                                 fi;;
+        --execution|-E)         n=$(($n+1))
+                                EXECUTIONS+=("${ARR[$n]}");;
         --help | -h)            usage && finalize;;
-        --|*)                   [ "$PARAM" == "--" ] && n=$(($n+1))
+        --)                     n=$(($n+1))
                                 while [ $n -lt ${#ARR[@]} ]; do
                                   PARAM="${ARR[$n]}"
                                   COMMANDS_TO_ADD+=("$PARAM")
                                   n=$(($n+1))
                                 done;;
+        *)                      COMMANDS_TO_ADD+=("$PARAM");;
     esac
     n=$(($n+1))
 done
 
 [ "$QUIET" == "true" ] && DEBUG= VERBOSE=
+
+if [ ${#EXECUTIONS[@]} -gt 0 ]; then
+  for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
+    arrayze_cmd CURRENT_CMD "${EXECUTIONS[$n]}"
+    p_debug "adding command ${CURRENT_CMD[0]} to analyze"
+    COMMANDS_TO_ADD+=("${CURRENT_CMD[0]}")
+  done
+fi
 
 if [ "$TARFILE" != "" -a "$ROOTFS" == "" ]; then
   ROOTFS=$(tempdir)
@@ -257,6 +339,12 @@ mkdir -p "$ROOTFS"
 mkdir -p "$ROOTFS/tmp"
 mkdir -p "$ROOTFS/dev"
 mkdir -p "$ROOTFS/proc"
+
+if is_plugin_active "strace"; then
+  for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
+    STRACE_command "${EXECUTIONS[$n]}"
+  done
+fi
 
 i_current=0
 while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do

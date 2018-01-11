@@ -73,6 +73,8 @@ Some options are:
 - **--ldconfig | -l**: Generate a _/etc/ldconfig.so_ file, adjusted to the new filesystem. It is suggested to always use this flag, to set the proper path to the libraries included in the new filesystem.
 - **--plugin**: Activates some plugins and sets the options for them (see the [Plug-ins](#plug-ins) section).
 - **--plugin-all**: Activates all the available plugins, using their default options (see the [Plug-ins](#plug-ins) sub-section).
+- **--execution | -E**: Executes the commandline included as parameter (e.g. ```-E "ping -c 1 www.google.es"```). This is specially useful for the strace plugin. It is possible to pass parameters to the _strace_ command plugin using the format "\<parameters\>,\<commandline\>" (e.g. ```-E "seconds=60,ping -c 1 www.google.es"``` will strace the ping for 60 seconds).
+- **--exclude | -e**: Exclude all paths that begin with the parameter (e.g. ```-e "/root/.ssh"```). This parameter can be included more that once.
 - **--verbose | -v**: Gives more information about the procedure.
 - **--debug**: Gives a lot more information about the procedure.
 
@@ -125,23 +127,17 @@ This plugin executes the applications for a while and tries to guess which files
 
 > In the case that you want to use **minicon** to analyze applications in a Docker container using the _strace_ plugin, is mandatory to run it as privileged (--privileged). Otherwise it will fail. It should not suppose any additional security problem, because it is a run-once analysis, and the resulting files will not require that the container is privileged (at least, because of **minicon**).
 
-The execution of an application without any parameter may not represent the usage of the application. This is why you can include a file that contains example of full commandlines that should represent the usage of the application. These commandlines should contain information about executions that makes use of all the functions that you want to use from the application in the resulting filesystem.
+The execution of an application without any parameter may not represent the usage of the application. This is why you can use the parameter ```-E``` to include commandlines that would represent the usage of the application. These commandlines should contain information about executions that makes use of all the functions that you want to use from the application in the resulting filesystem.
 
-> **Example**: The application _/usr/games/cowsay_ does nothing by itself, but if you pass a parameter, it loads perl and use some other files.
-
-The file contains one commandline per line, for different executables. If several commandlines for the same executable are found in the file, **minicon** will use only the first of them.
-
-> **Example**: /usr/games/cowsay "hello world"
+> **Example**: The application _/usr/games/cowsay_ does nothing by itself, but if you pass a parameter, it loads perl and use some other files. You can use the parameter ```-E "/usr/games/cowsay hello"``` to run it.
 
 To activate the strace plugin you can use the option ```--plugin```. Some examples are included below:
 
 ```bash
 # The next execution will only try to execute the application cowsay for 3 seconds
-$ ./minicon -t tarfile --plugin=strace /usr/games/cowsay
+$ ./minicon -t tarfile --plugin=strace -E '/usr/games/cowsay hello'
 # The next execution will try to execute the application cowsay for 3 seconds, but will look for a commandline in the file "mycommand" in the current folder
-$ ./minicon -t tarfile --plugin=strace:execfile=./mycommand  /usr/games/cowsay
-# The next execution will try to execute the application cowsay for 10 seconds, and will look for a commandline in the file "mycommand" in the current folder
-$ ./minicon -t tarfile --plugin=strace:seconds=10:execfile=./mycommand  /usr/games/cowsay
+$ ./minicon -t tarfile --plugin=strace:seconds=10 -E '/usr/games/cowsay hello'
 # The next execution will try to execute the application bash for 3 seconds (the default value), but will exclude any file used by the application that is found either in /dev or /proc
 $ ./minicon -t tarfile --plugin=strace:exclude=/dev:exclude=/proc bash
 ```
@@ -309,12 +305,7 @@ minicon             uc2fat              2a95d52068fd        2 minutes ago       
 But we can reduce the size, if we know which tools we want to provide to our users. From the folder in which it is installed **minicon**, we can execute the following commands to minimize the container and to import it into docker:
 
 ```
-$ cat > usecases/uc2/execfile-cmd << EOF
-ssh localhost
-/usr/bin/ssh localhost
-/bin/ping -c 1 www.google.es
-EOF
-$ docker run --privileged --rm -it -v $PWD:/tmp/minicon minicon:uc2fat bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/usecases/uc2/uc2.tar -l --plugin=strace:execfile=/tmp/minicon/usecases/uc2/execfile-cmd bash ssh ip id cat ls mkdir ping wget'
+$ docker run --privileged --rm -it -v $PWD:/tmp/minicon minicon:uc2fat bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/usecases/uc2/uc2.tar -l --plugin=strace -E "/usr/bin/ssh localhost" -E "/bin/ping -c 1 www.google.es" bash ssh ip id cat ls mkdir ping wget'
 $ docker import usecases/uc2/uc2.tar minicon:uc2
 ```
 

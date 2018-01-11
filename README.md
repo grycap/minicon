@@ -45,17 +45,17 @@ $ mv minicon /opt
 
 ### 1.2.1 Dependencies
 
-**minicon** depends on the commands _ldd_, _file_, _strace_ and _tar_. So, you need to install the proper packages in your system.
+**minicon** depends on the commands _ldd_, _file_, _strace_, _rsync_ and _tar_. So, you need to install the proper packages in your system.
 
 **Ubuntu**
 
 ```bash
-$ apt-get install libc-bin tar file strace
+$ apt-get install libc-bin tar file strace rsync
 ```
 
 **CentOS**
 ```bash
-$ yum install glibc-common tar file strace
+$ yum install glibc-common tar file strace rsync
 ```
 ## 1.3 Usage
 

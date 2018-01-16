@@ -133,6 +133,10 @@ while [ $n -lt ${#ARR[@]} ]; do
     n=$(($n+1))
 done
 
+if [ "$OUTFILE" != "" ]; then
+  OUTFILE="$(readlink -m "$OUTFILE")"
+fi
+
 if [ "$TMPDIR" == "" ]; then
   TMPDIR="$(tempdir)"
 else
@@ -141,8 +145,16 @@ else
 fi
 
 if [ "$MERGEDNAME" == "" ]; then
-  MERGEDNAME="${FIRSTIMAGE/:/}:${SECONDIMAGE/:/}"
+  MERGEDNAME="$(cat /proc/sys/kernel/random/uuid)"
+  MERGEDNAME="${MERGEDNAME%%-*}"
 fi
+
+# Correct MERGEDNAME
+IFS=':' read BASE TAG <<< "${MERGEDNAME}"
+if [ "$TAG" == "" ]; then
+  MERGEDNAME="${MERGEDNAME}:latest"
+fi
+p_out "$MERGEDNAME"
 
 cd $TMPDIR 2> /dev/null || finalize 1 "could not change to folder $TMPDIR"
 p_info "working folder: $TMPDIR"

@@ -166,12 +166,24 @@ function tempdir() {
   echo $RES
 }
 
+function verify_dependencies() {
+  if ! docker --version > /dev/null 2> /dev/null; then
+    finalize 1 "docker command is needed"
+  fi
+  if ! jq --version > /dev/null 2> /dev/null; then
+    finalize 1 "jq command is needed"
+  fi
+  if ! tar --version > /dev/null 2> /dev/null; then
+    finalize 1 "tar command is needed"
+  fi
+}
+
 function read_lines_in_array() {
   local MANIFEST="$1"
   local VARNAME="$2"
 
   local R n=0
-  declare -g -n $VARNAME
+  declare -g -a -n $VARNAME
   while read R; do
     read ${VARNAME}[$n] <<< "$R"
     n=$((n+1))
@@ -249,6 +261,8 @@ while [ $n -lt ${#ARR[@]} ]; do
     esac
     n=$(($n+1))
 done
+
+verify_dependencies
 
 if [ "$OUTFILE" != "" ]; then
   OUTFILE="$(readlink -m "$OUTFILE")"

@@ -94,7 +94,6 @@ function verify_dependencies() {
   fi
 }
 
-# declare -a _MUTED_EXPRESSIONS=(".*[[:space:]]was[[:space:]]used" ".*[[:space:]]invoking[[:space:]]plugin[[:space:]].*" ".*[[:space:]]copying[[:space:]].*")
 _MUTED_EXPRESSIONS=()
 
 function p_mute() {
@@ -389,7 +388,6 @@ function arrayze_cmd() {
   local AN="$1"
   local _CMD="$2"
   local R n=0
-  declare -g -a -n $AN
   while read R; do
     read ${AN}[n] <<< "$R"
     n=$((n+1))
@@ -420,8 +418,6 @@ _ALREADY_STRACED=()
 function MARK_straced() {
   _ALREADY_STRACED+=("$1")
 }
-
-# MARK_straced "/etc/s6/services/.s6-svscan/finish"
 
 function already_straced() {
   local i
@@ -502,7 +498,7 @@ function PLUGIN_10_strace() {
   fi
 
   # Let's see if there is a specific commandline (with parameters) for this command in the file
-  local CMDTOEXEC CMDLINE
+  local CMDTOEXEC CMDLINE=()
   if [ -e "$EXECFILE" ]; then
     local L 
     while read L; do
@@ -534,7 +530,7 @@ function PLUGIN_10_strace() {
 }
 
 function STRACE_command() {
-  local CMDLINE
+  local CMDLINE=()
   local COMMAND
 
   arrayze_cmd CMDLINE "$1"
@@ -836,6 +832,7 @@ done
 
 [ "$QUIET" == "true" ] && DEBUG= VERBOSE=
 
+CURRENT_CMD=()
 if [ ${#EXECUTIONS[@]} -gt 0 ]; then
   for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
     arrayze_cmd CURRENT_CMD "${EXECUTIONS[$n]}"
@@ -876,10 +873,6 @@ mkdir -p "$ROOTFS"
 mkdir -p "$ROOTFS/tmp"
 mkdir -p "$ROOTFS/dev"
 mkdir -p "$ROOTFS/proc"
-
-p_mute ".* was used"
-p_mute ".* copying .*"
-# p_mute ".* invoking plugin .*"
 
 if is_plugin_active "strace"; then
   for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do

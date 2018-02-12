@@ -299,6 +299,7 @@ done
 
 [ "$QUIET" == "true" ] && DEBUG= VERBOSE=
 
+CURRENT_CMD=()
 if [ ${#EXECUTIONS[@]} -gt 0 ]; then
   for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
     arrayze_cmd CURRENT_CMD "${EXECUTIONS[$n]}"

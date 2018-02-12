@@ -66,7 +66,6 @@ function read_lines_in_array() {
   local VARNAME="$2"
 
   local R n=0
-  declare -g -a -n $VARNAME
   while read R; do
     read ${VARNAME}[$n] <<< "$R"
     n=$((n+1))
@@ -178,6 +177,8 @@ if [ "$CONTINUE" != "true" ]; then
   extract_image "2" "$SECONDIMAGE"
 fi
 
+LAYERS_1=()
+LAYERS_2=()
 MANIFEST_1="$(cat 1/manifest.json 2> /dev/null)"
 read_lines_in_array "$MANIFEST_1" "LAYERS_1"
 MANIFEST_2="$(cat 2/manifest.json 2> /dev/null)"

@@ -1,0 +1,314 @@
+#!/bin/bash
+#
+# importcon - Imports a filesystem to a container (copying the features from other container)
+# https://github.com/grycap/minicon
+#
+# Copyright (C) GRyCAP - I3M - UPV 
+# Developed by Carlos A. caralla@upv.es
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+function usage() {
+  cat <<EOF
+
+importcon is a tool that imports the contents from a tarball to create a filesystem image 
+  using the "docker import" command. But it takes as reference an existing docker image to
+  get parameters such as ENV, USER, WORKDIR, etc. to set them for the new imported image.
+
+$0 <options> <container filesystem in tar file>
+
+  --image | -i <image>      Name of the existing image to copy the parameters
+  --tag | -t <tag>          Tag for the imported image (random if not provided)
+  --env | -E                Copy ENV settings
+  --entrypoint | -e         Copy ENTRYPOINT settings
+  --expose | -x             Copy EXPOSE settings
+  --onbuild | -o            Copy ONBUILD settings
+  --user | -u               Copy USER settings
+  --volume | -V             Copy VOLUME settings
+  --workdir | -w            Copy WORKDIR settins
+  --cmd | -c                Copy CMD settings
+  --all | -A                Copy all the previous settings: ENV, ENTRYPOINT, EXPOSE,
+                            ONBUILD, USER, VOLUME, WORKDIR and CMD.
+  --keeptemporary | -k      Keeps the temporary folder. Otherwise, the folder is removed (if it is
+                            created by mergecon).
+  --verbose | -v            Shows more information about the procedure.
+  --debug                   Shows a lot more information about the procedure.
+  --help | -h               Shows this help and exits.
+
+EOF
+}
+
+function verify_dependencies() {
+  if ! docker --version > /dev/null 2> /dev/null; then
+    finalize 1 "docker command is needed to import the image"
+  fi
+  if ! jq --version > /dev/null 2> /dev/null; then
+    finalize 1 "jq command is needed"
+  fi
+}
+
+_MUTED_EXPRESSIONS=()
+
+function p_mute() {
+  _MUTED_EXPRESSIONS+=("${1// /[[:space:]]}")
+}
+
+function p_errfile() {
+  local i
+  local E
+  for ((i=0;i<${#_MUTED_EXPRESSIONS[@]};i=i+1)); do
+    E="${_MUTED_EXPRESSIONS[$i]}"
+    if [[ "$1" =~ ^$E ]]; then
+      return 0
+    fi
+  done
+
+  if [ "$LOGFILE" == "" ]; then
+    echo "$@" >&2
+  else
+    touch -f "$LOGFILE"
+    if [ $? -eq 0 ]; then
+      echo "$@" >> "$LOGFILE"
+    fi
+  fi
+}
+
+function p_error() {
+  local O_STR="[ERROR] $LOGGER $(date +%Y.%m.%d-%X) $@"
+  p_errfile "$O_STR"
+}
+
+function p_warning() {
+  local O_STR="[WARNING] $LOGGER $(date +%Y.%m.%d-%X) $@"
+  p_errfile "$O_STR"
+}
+
+function p_info() {
+  local L
+  if [ "$VERBOSE" == "true" ]; then
+    local TS="$(date +%Y.%m.%d-%X)"
+    while read L; do
+      p_errfile "[INFO] $LOGGER $TS $@"
+    done <<< "$@"
+  fi
+}
+
+function p_out() {
+  if [ "$QUIET" != "true" ]; then
+    while read L; do
+      echo "$@"
+    done <<< "$@"
+  fi
+}
+
+function p_debug() {
+  local L
+  if [ "$DEBUG" == "true" ]; then
+    local TS="$(date +%Y.%m.%d-%X)"
+    while read L; do
+      p_errfile "[DEBUG] $LOGGER $TS $L"
+    done <<< "$@"
+  fi
+}
+
+function set_logger() {
+  if [ "$1" != "" ]; then
+    LOGGER="[$1]"
+  else
+    LOGGER=
+  fi
+}
+
+function finalize() {
+  # Finalizes the execution of the this script and shows an error (if provided)
+  local ERR=$1
+  shift
+  local COMMENT=$@
+  [ "$ERR" == "" ] && ERR=0
+  [ "$COMMENT" != "" ] && p_error "$COMMENT"
+  if [ "$KEEPTEMPORARY" != "true" ]; then
+    p_debug removing temporary folder "$TMPDIR"
+    rm -rf "$TMPDIR"
+  fi  
+  exit $ERR
+}
+function tempfile {
+  local FOLDER="$1"
+  if [ "$FOLDER" == "" ]; then
+    FOLDER=/tmp
+  fi
+  if [ ! -d "$FOLDER" ]; then
+    finalize 1 "folder $FOLDER does not exist"
+  fi
+  RES=$FOLDER/ftemp_${RANDOM}_$(date +%s)
+  touch $RES
+  while [ $? -ne 0 ]; do
+    RES=$FOLDER/ftemp_${RANDOM}_$(date +%s)
+    touch $RES
+  done
+  echo $RES
+}
+
+function tempdir() {
+  # Creates a unique temporary folder
+  local FOLDER="$1"
+  if [ "$FOLDER" == "" ]; then
+    FOLDER=/tmp
+  fi
+  if [ ! -d "$FOLDER" ]; then
+    finalize 1 "folder $FOLDER does not exist"
+  fi
+  RES=$FOLDER/ftemp_${RANDOM}_$(date +%s)
+  mkdir -p $RES 2> /dev/null
+  while [ $? -ne 0 ]; do
+    RES=$FOLDER/ftemp_${RANDOM}_$(date +%s)
+    mkdir -p $RES 2> /dev/null
+  done
+  echo $RES
+}
+function trim() {
+  shopt -s extglob
+  local A="${1##+([[:space:]])}"
+  A="${A%%+([[:space:]])}"
+  shopt -u extglob
+  echo "$A"
+}
+
+
+n=0
+while [ $# -gt 0 ]; do
+    if [ "${1:0:1}" == "-" -a "${1:1:1}" != "-" -a "${1:1:1}" != "" ]; then
+        for f in $(echo "${1:1}" | sed 's/\(.\)/-\1 /g' ); do
+            ARR[$n]="$f"
+            n=$(($n+1))
+        done
+    else
+        ARR[$n]="$1"
+        n=$(($n+1))
+    fi
+    shift
+done
+
+TMPDIR=
+OUTFILE=
+n=0
+
+while [ $n -lt ${#ARR[@]} ]; do
+    PARAM="${ARR[$n]}"
+    case "$PARAM" in
+        --image|-i)             n=$(($n+1))
+                                FROMIMAGE="${ARR[$n]}";;
+        --tag|-t)               n=$(($n+1))
+                                NEWNAME="${ARR[$n]}";;
+        --env|-E)               COPY_ENV=true;;
+        --entrypoint|-e)        COPY_ENTRYPOINT=true;;
+        --expose|-x)            COPY_EXPOSE=true;;
+        --onbuild|-o)           COPY_ONBUILD=true;;
+        --user|-u)              COPY_USER=true;;
+        --volume|-V)            COPY_VOLUME=true;;
+        --workdir|-w)           COPY_WORKDIR=true;;
+        --cmd|-c)               COPY_CMD=true;;
+        --all|-A)               COPY_ENV=true
+                                COPY_ENTRYPOINT=true
+                                COPY_EXPOSE=true
+                                COPY_ONBUILD=true
+                                COPY_USER=true
+                                COPY_VOLUME=true
+                                COPY_WORKDIR=true
+                                COPY_CMD=true;;
+        --simulate|-s)          SIMULATEONLY=true;;
+        --verbose|-v)           VERBOSE=true;;
+        --debug)                DEBUG=true;;
+        --help | -h)            usage && finalize;;
+        --keeptemporary|-k)     KEEPTEMPORARY="true";;
+        *)                      [ "$FILENAME" != "" ] && usage && finalize 1 "already provided a filename"
+                                FILENAME="$PARAM";;
+    esac
+    n=$(($n+1))
+done
+
+verify_dependencies
+
+if [ "$FILENAME" != "" ]; then
+  FILENAME="$(readlink -e "$FILENAME")"
+fi
+
+if [ "$FILENAME" == "" ]; then
+  finalize 1 "filename '$FILENAME' is invalid"
+fi
+
+if [ "$TMPDIR" == "" ]; then
+  TMPDIR="$(tempdir)"
+else
+  # To avoid removing the folder in case that is is provided in the commandline
+  KEEPTEMPORARY=false
+fi
+
+if [ "$NEWNAME" == "" ]; then
+  NEWNAME="$(cat /proc/sys/kernel/random/uuid)"
+  NEWNAME="${NEWNAME%%-*}"
+fi
+
+# Correct NEWNAME
+IFS=':' read BASE TAG <<< "${NEWNAME}"
+if [ "$TAG" == "" ]; then
+  NEWNAME="${NEWNAME}:latest"
+fi
+p_out "$NEWNAME"
+
+INSPECT_FILE="$TMPDIR/inspect"
+docker inspect "$FROMIMAGE" > "$INSPECT_FILE"
+
+function add_field() {
+  local FIELD="$1"
+  local DOCKERFILEKW="$2"
+  local RAW="$3"
+  local RAWJQ="$4"
+  local C_RESULT
+
+  if [ "$RAW" == "true" ]; then
+    C_RESULT="$(cat "$INSPECT_FILE" | jq -r ".[].Config.${FIELD}${RAWJQ}"  | tr '\n' ' ')"
+  else
+    C_RESULT="$(cat "$INSPECT_FILE" | jq -r "if .[].Config.$FIELD | type == \"array\" then .[].Config.$FIELD | .[] else .[].Config.$FIELD end")"
+  fi
+  C_RESULT="$(trim "$C_RESULT")"
+  if [ "$C_RESULT" != "" -a "$C_RESULT" != "null" ]; then
+    while read L; do
+      CMDLINE+=("-c")
+      CMDLINE+=("$DOCKERFILEKW $L")
+      p_debug "adding $DOCKERFILEKW $C_RESULT"
+    done <<< "$C_RESULT"
+  else
+    p_debug "ignoring field $1 because it has value '$C_RESULT' in the original container"
+  fi
+}
+
+[ "$COPY_ENV" == "true" ] && add_field "Env" "ENV"
+[ "$COPY_USER" == "true" ] && add_field "User" "USER" "true"
+[ "$COPY_ENTRYPOINT" == "true" ] && add_field "Entrypoint" "ENTRYPOINT" "true"
+[ "$COPY_ONBUILD" == "true" ] && p_warning "Copying ONBUILD has not been tested, yet" && add_field "OnBuild" "ONBUILD"
+[ "$COPY_VOLUME" == "true" ] && p_warning "Copying VOLUME has not been tested, yet" && add_field "Volumes" "VOLUME" "true" "|keys[]"
+[ "$COPY_WORKDIR" == "true" ] && add_field "WorkingDir" "WORKDIR" "true"
+[ "$COPY_CMD" == "true" ] && add_field "Cmd" "CMD" "true"
+[ "$COPY_EXPOSE" == "true" ] && add_field "ExposedPorts" "EXPOSE" "true" "|keys[]"
+
+p_debug docker import "${CMDLINE[@]}" "$FILENAME" "$NEWNAME"
+
+if [ "$SIMULATEONLY" != "true" ]; then
+  docker import "${CMDLINE[@]}" "$FILENAME" "$NEWNAME"
+else
+  p_warning "not executed because of commandline options"
+fi
+
+finalize

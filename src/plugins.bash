@@ -144,7 +144,6 @@ function arrayze_cmd() {
   local AN="$1"
   local _CMD="$2"
   local R n=0
-  declare -g -a -n $AN
   while read R; do
     read ${AN}[n] <<< "$R"
     n=$((n+1))
@@ -255,7 +254,7 @@ function PLUGIN_10_strace() {
   fi
 
   # Let's see if there is a specific commandline (with parameters) for this command in the file
-  local CMDTOEXEC CMDLINE
+  local CMDTOEXEC CMDLINE=()
   if [ -e "$EXECFILE" ]; then
     local L 
     while read L; do
@@ -287,7 +286,7 @@ function PLUGIN_10_strace() {
 }
 
 function STRACE_command() {
-  local CMDLINE
+  local CMDLINE=()
   local COMMAND
 
   arrayze_cmd CMDLINE "$1"

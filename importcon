@@ -185,6 +185,57 @@ function trim() {
   echo "$A"
 }
 
+function generate_dockerimagename() {
+  local NEWNAME
+  NEWNAME="$(cat /proc/sys/kernel/random/uuid)"
+  NEWNAME="${NEWNAME%%-*}"
+  echo "$NEWNAME"
+}
+
+function correct_dockerimagename() {
+  local IMNAME="$1"
+  local BASE TAG
+
+  # Correct NEWNAME
+  IFS=':' read BASE TAG <<< "${IMNAME}"
+  if [ "$TAG" == "" ]; then
+    IMNAME="${IMNAME}:latest"
+  fi
+  echo "$IMNAME"
+}
+
+_INSPECT_STRING=
+_INSPECT_IMAGE=
+function get_config_field() {
+  local IMAGE="$1"
+  local FIELD="$2"
+  local RAW_JQ="$3"
+  local C_RESULT
+
+  if [ "$_INSPECT_IMAGE" != "$IMAGE" ]; then
+    _INSPECT_STRING="$(docker inspect $IMAGE)"
+    _INSPECT_IMAGE="$IMAGE"
+  fi
+
+  C_RESULT="$(echo "$_INSPECT_STRING" | jq -r "if .[].Config.${FIELD} != null then if .[].Config.${FIELD}${RAW_JQ} | type == \"array\" then .[].Config.${FIELD}${RAW_JQ} | .[] else .[].Config.${FIELD}${RAW_JQ} end else null end")"
+  echo "$(trim "$C_RESULT")"
+}
+
+function get_config_field_raw() {
+  local IMAGE="$1"
+  local FIELD="$2"
+  local RAW_JQ="$3"
+  local C_RESULT
+
+  if [ "$_INSPECT_IMAGE" != "$IMAGE" ]; then
+    _INSPECT_STRING="$(docker inspect $IMAGE)"
+    _INSPECT_IMAGE="$IMAGE"
+  fi
+
+  C_RESULT="$(echo "$_INSPECT_STRING" | jq -r "if .[].Config.${FIELD} != null then .[].Config.${FIELD}${RAW_JQ} else null end")"
+  echo "$(trim "$C_RESULT")"
+}
+
 
 n=0
 while [ $# -gt 0 ]; do
@@ -200,7 +251,6 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-TMPDIR=
 OUTFILE=
 n=0
 
@@ -232,7 +282,7 @@ while [ $n -lt ${#ARR[@]} ]; do
         --debug)                DEBUG=true;;
         --help | -h)            usage && finalize;;
         --keeptemporary|-k)     KEEPTEMPORARY="true";;
-        *)                      [ "$FILENAME" != "" ] && usage && finalize 1 "already provided a filename"
+        *)                      [ "$FILENAME" != "" ] && usage && finalize 1 "invalid parameter $PARAM. already provided a filename"
                                 FILENAME="$PARAM";;
     esac
     n=$(($n+1))
@@ -241,67 +291,63 @@ done
 verify_dependencies
 
 if [ "$FILENAME" != "" ]; then
-  FILENAME="$(readlink -e "$FILENAME")"
+  VALIDFILENAME="$(readlink -e "$FILENAME")"
 fi
 
-if [ "$FILENAME" == "" ]; then
+if [ "$VALIDFILENAME" == "" ]; then
   finalize 1 "filename '$FILENAME' is invalid"
 fi
 
-if [ "$TMPDIR" == "" ]; then
-  TMPDIR="$(tempdir)"
-else
-  # To avoid removing the folder in case that is is provided in the commandline
-  KEEPTEMPORARY=false
-fi
+FILENAME="$VALIDFILENAME"
 
 if [ "$NEWNAME" == "" ]; then
-  NEWNAME="$(cat /proc/sys/kernel/random/uuid)"
-  NEWNAME="${NEWNAME%%-*}"
+  NEWNAME="$(generate_dockerimagename)"
 fi
+NEWNAME=$(correct_dockerimagename "$NEWNAME")
 
-# Correct NEWNAME
-IFS=':' read BASE TAG <<< "${NEWNAME}"
-if [ "$TAG" == "" ]; then
-  NEWNAME="${NEWNAME}:latest"
-fi
 p_out "$NEWNAME"
 
-INSPECT_FILE="$TMPDIR/inspect"
-docker inspect "$FROMIMAGE" > "$INSPECT_FILE"
+function build_cmdline() {
+  local LINES="$1"
+  local KW="$2"
 
-function add_field() {
-  local FIELD="$1"
-  local DOCKERFILEKW="$2"
-  local RAW="$3"
-  local RAWJQ="$4"
-  local C_RESULT
-
-  if [ "$RAW" == "true" ]; then
-    C_RESULT="$(cat "$INSPECT_FILE" | jq -r ".[].Config.${FIELD}${RAWJQ}"  | tr '\n' ' ')"
-  else
-    C_RESULT="$(cat "$INSPECT_FILE" | jq -r "if .[].Config.$FIELD | type == \"array\" then .[].Config.$FIELD | .[] else .[].Config.$FIELD end")"
-  fi
-  C_RESULT="$(trim "$C_RESULT")"
-  if [ "$C_RESULT" != "" -a "$C_RESULT" != "null" ]; then
-    while read L; do
-      CMDLINE+=("-c")
-      CMDLINE+=("$DOCKERFILEKW $L")
-      p_debug "adding $DOCKERFILEKW $C_RESULT"
-    done <<< "$C_RESULT"
-  else
-    p_debug "ignoring field $1 because it has value '$C_RESULT' in the original container"
-  fi
+  while read L; do
+    if [ "$L" != "" ]; then
+      if [ "$L" != "null" ]; then
+        CMDLINE+=("-c")
+        CMDLINE+=("$KW $L")
+        p_debug "adding -c $KW $L"
+      else
+        p_debug "ignoring field $KW because it has value '$L' in the original container"
+      fi
+    fi
+  done <<< "$LINES"
 }
 
-[ "$COPY_ENV" == "true" ] && add_field "Env" "ENV"
-[ "$COPY_USER" == "true" ] && add_field "User" "USER" "true"
-[ "$COPY_ENTRYPOINT" == "true" ] && add_field "Entrypoint" "ENTRYPOINT" "true"
-[ "$COPY_ONBUILD" == "true" ] && p_warning "Copying ONBUILD has not been tested, yet" && add_field "OnBuild" "ONBUILD"
-[ "$COPY_VOLUME" == "true" ] && p_warning "Copying VOLUME has not been tested, yet" && add_field "Volumes" "VOLUME" "true" "|keys[]"
-[ "$COPY_WORKDIR" == "true" ] && add_field "WorkingDir" "WORKDIR" "true"
-[ "$COPY_CMD" == "true" ] && add_field "Cmd" "CMD" "true"
-[ "$COPY_EXPOSE" == "true" ] && add_field "ExposedPorts" "EXPOSE" "true" "|keys[]"
+parameters="\
+COPY_ENV Env ENV
+COPY_USER User USER
+COPY_ENTRYPOINT Entrypoint ENTRYPOINT join raw
+COPY_ONBUILD OnBuild ONBUILD
+COPY_VOLUME Volumes VOLUME nojoin raw |keys[]
+COPY_WORKDIR WorkingDir WORKDIR raw
+COPY_CMD Cmd CMD join raw
+COPY_EXPOSE ExposedPorts EXPOSE nojoin raw |keys[]"
+
+while read L; do
+  read VARCOND FIELD KW JOIN RAW XTRA <<< "$L"
+  if [ "${!VARCOND}" == "true" ]; then
+    if [ "$RAW" == "raw" ]; then
+      RES="$(get_config_field_raw "$FROMIMAGE" "$FIELD" "$XTRA")"
+    else
+      RES="$(get_config_field "$FROMIMAGE" "$FIELD" "$XTRA")"
+    fi
+    if [ "$JOIN" == "join" ]; then
+      RES="$(echo "$RES" | tr '\n' ' ')"
+    fi
+    build_cmdline "$RES" "$KW" 
+  fi
+done <<< "${parameters}"
 
 p_debug docker import "${CMDLINE[@]}" "$FILENAME" "$NEWNAME"
 

@@ -134,20 +134,9 @@ function _build_rsync() {
 }
 
 function cp_rsync() {
-  local SRC ROOTFS RECURSE
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      -r) RECURSE=true;;
-      *)  if [ "$SRC" == "" ]; then
-            SRC="$1"
-          else 
-            if [ "$ROOTFS" == "" ]; then
-              ROOTFS="$1"
-            fi
-          fi;;
-    esac
-    shift
-  done
+  local SRC="$1"
+  local ROOTFS="$2"
+  local RECURSE="$3"
 
   if [ "${SRC:0:2}" == "./" ]; then
     SRC="${PWD}${SRC:1}"
@@ -166,20 +155,9 @@ function cp_rsync() {
 }
 
 function cp_cp() {
-  local SRC ROOTFS RECURSE
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      -r) RECURSE=true;;
-      *)  if [ "$SRC" == "" ]; then
-            SRC="$1"
-          else 
-            if [ "$ROOTFS" == "" ]; then
-              ROOTFS="$1"
-            fi
-          fi;;
-    esac
-    shift
-  done
+  local SRC="$1"
+  local ROOTFS="$2"
+  local RECURSE="$3"
 
   if [ "${SRC:0:2}" == "./" ]; then
     SRC="${PWD}${SRC:1}"
@@ -202,15 +180,45 @@ function cp_cp() {
   fi
 }
 
-if [ "$CP_FUNC" == "" ]; then
-  rsync --version 2> /dev/null > /dev/null
-  if [ $? -eq 0 ]; then
-    CP_FUNC=cp_rsync
-  else
-    p_warning "rsync is not available... some file permissions will be lost"
-    CP_FUNC=cp_cp
+_FILES_COPIED=""
+
+function cp_wrapper() {
+  if [ "$CP_FUNC" == "" ]; then
+    rsync --version 2> /dev/null > /dev/null
+    if [ $? -eq 0 ]; then
+      CP_FUNC=cp_rsync
+    else
+      p_warning "rsync is not available... some file permissions will be lost"
+      CP_FUNC=cp_cp
+    fi
   fi
-fi
+
+  local SRC ROOTFS RECURSE
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -r) RECURSE=true;;
+      *)  if [ "$SRC" == "" ]; then
+            SRC="$1"
+          else 
+            if [ "$ROOTFS" == "" ]; then
+              ROOTFS="$1"
+            fi
+          fi;;
+    esac
+    shift
+  done
+  
+  local EXISTING="$(echo "$_FILES_COPIED" | grep "^${SRC}$")"
+  if [ "$EXISTING" == "$SRC" ]; then
+    p_debug "skipping file $SRC because it has been already copied"
+    return
+  fi
+
+  $CP_FUNC "$SRC" "$ROOTFS" "$RECURSE"
+  _FILES_COPIED="${_FILES_COPIED}
+${SRC}"
+}
+
 
 function copy() {
   # copies one file (or folder) to the same destination in the root filesystem
@@ -252,7 +260,7 @@ function copy() {
     p_error 1 "failed to read $SRC"
   fi
 
-  $CP_FUNC $RECURSE "$SRC" "$ROOTFS"
+  cp_wrapper $RECURSE "$SRC" "$ROOTFS"
 }
 
 # Credits fot this function go to https://stackoverflow.com/a/18898782

@@ -20,8 +20,49 @@ function plugin_parameter() {
   return 1
 }
 
+function buildpaths() {
+  local S_PATH="$1"
+  local L_PATH="$S_PATH"
+  local C_PATH="$S_PATH"
+
+  while [ "$C_PATH" != "/" -a "$C_PATH" != "." -a "$C_PATH" != ".." ]; do
+    C_PATH="$(dirname "$C_PATH")"
+    L_PATH="$C_PATH
+$L_PATH"
+  done
+  echo "$L_PATH"
+}
+
+function checklinks() {
+  local L_PATH="$1"
+  local C_PATH
+  local D_PATH
+  local FOUND
+  while read C_PATH; do
+    if [ "$C_PATH" != "" -a "$C_PATH" != "." -a "$C_PATH" != ".." -a -h "$C_PATH" ]; then
+      D_PATH="$(readlink "$C_PATH")"
+      if [ "${D_PATH:0:1}" != "/" ]; then
+        D_PATH="$(dirname "${C_PATH}")/${D_PATH}"
+      fi
+      D_PATH="$(realpath -Ls "$D_PATH")"
+      FOUND=true
+      break
+    fi
+  done <<< "$L_PATH"
+  if [ "$FOUND" == "true" ]; then
+    local F_PATH="$(echo "$L_PATH" | tail -n 1)"
+    local N_PATH="${#C_PATH}"
+    N_PATH="${D_PATH}${F_PATH:$N_PATH}"
+    echo "$F_PATH:$C_PATH:$D_PATH:$N_PATH"
+  fi
+}
+
 function _linked_file() {
   local L_PATH="$1"
+  local L_PATHS
+  local RES
+  local C_FILE="$L_PATH"
+  local FINAL_FILE="$L_PATH"
 
   # Special cases that we do not want to handle
   if [ "$L_PATH" == "." -o "$L_PATH" == ".." ]; then
@@ -29,39 +70,25 @@ function _linked_file() {
     return
   fi
 
-  local R_PATH="$(readlink -f -- "$1")"
-
-  # If the actual file (readlink) is not the same than the original file, it can be supposed that
-  # the original file had a link at some point in the path but it is not necessarily a link (e.g. 
-  # /var/run -> /run ... /var/run/s6 will be /run/r6, but the link is at the middle).
-  if [ "$R_PATH" != "" -a "$L_PATH" != "$R_PATH" ]; then
-
-    # If the file itself is a link, we need to create such link
-    if [ -h "$L_PATH" ]; then
-      local L_DST="$ROOTFS/$(dirname "$L_PATH")"
-  
-      if [ ! -e "$L_DST/$(basename $L_PATH)" ]; then
-        local R_DST="$ROOTFS/$(dirname "$R_PATH")"
-
-        # TODO: need to revise permission when creating this path... permissions for the folder but
-        # also the intermediate folders.
-        mkdir -p "$L_DST" 2> /dev/null
-        local REL_PATH="$(relPath "$L_DST" "$R_DST")"
-        p_debug "$L_PATH is a link to $REL_PATH/$(basename $R_PATH)"
-        ln -s $REL_PATH/$(basename $R_PATH) $L_DST/$(basename $L_PATH)
-      fi
-    fi
-
-    if [ -e "$R_PATH" ]; then
-      p_debug "$L_PATH -> $R_PATH"
-      echo "$R_PATH"
+  while [ "$C_FILE" != "" ]; do
+    L_PATHS="$(buildpaths "$C_FILE")"
+    RES="$(checklinks "$L_PATHS")"
+    if [ "$RES" != "" ]; then
+      local SRC DST L_ORIG L_DST
+      IFS=':' read SRC L_ORIG L_DST DST <<< "${RES}:"
+      p_debug "$L_ORIG -> $L_DST"
+      L_DST="$(relPath "$(dirname $L_ORIG)" "$L_DST")"
+      
+      local EFF_FILE="$ROOTFS/$L_ORIG"
+      mkdir -p "$(dirname "$EFF_FILE")"
+      ln -s "$L_DST" "$EFF_FILE" 2> /dev/null
+      C_FILE="$DST"
     else
-      p_debug "$L_PATH -> ???"
-      echo "$L_PATH"
+      FINAL_FILE="$C_FILE"
+      C_FILE=
     fi
-  else
-    echo "$L_PATH"
-  fi
+  done
+  echo "$FINAL_FILE"
 }
 
 function PLUGIN_00_link() {
@@ -95,7 +122,7 @@ function PLUGIN_02_folder() {
 
   if [ -d "$S_PATH" ]; then
     p_debug "copying the whole folder $S_PATH"
-    copy "$S_PATH"
+    copy "$S_PATH" -r
     return 1
   fi
 
@@ -214,12 +241,28 @@ function _strace_exec() {
   local STRINGS
   local L BN
 
+  # Add all the folders and files that are used (folders are included as a whole and the
+  # library are also analyzed)
   FUNCTIONS="open|mkdir"
   STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
     if [ "$L" != "" ]; then
       BN="$(basename $L)"
-      # add_command "$L"
+      if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
+        add_command "$L"
+      else
+        copy "$L" -r
+      fi
+    fi
+  done <<< "$(analyze_strace_strings "$STRINGS")"
+
+  # Add all the folders and files that checked to exist (folders are not copied, just may
+  # appear in the resulting filesystem, but libraries are analyzed)
+  FUNCTIONS="stat"
+  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  while read L; do
+    if [ "$L" != "" ]; then
+      BN="$(basename $L)"
       if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
         add_command "$L"
       else
@@ -228,6 +271,7 @@ function _strace_exec() {
     fi
   done <<< "$(analyze_strace_strings "$STRINGS")"
 
+  # Add all the executables that have been executed (they are analyzed).
   FUNCTIONS="exec.*"
   STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
@@ -298,6 +342,8 @@ function STRACE_command() {
     local N_PATH="${S_PATH##*,}"
 
     if [ "$N_PATH" != "" -a "$OPTIONS" != "" ]; then
+      # Remove the possible leading spaces before the options
+      OPTIONS="$(trim "$OPTIONS")"
       p_info "specific options to strace: $OPTIONS"
       PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED},strace:${OPTIONS}"
       S_PATH="$N_PATH"
@@ -341,17 +387,15 @@ function PLUGIN_11_scripts() {
   local SHBANG_LINE=$(cat $S_PATH | sed '/^#!.*/q' | tail -n 1 | sed 's/^#![ ]*//')
   local INTERPRETER="${SHBANG_LINE%% *}"
   ADD_PATHS="$INTERPRETER"
+  local ENV_APP=
   if [ "$(basename $INTERPRETER)" == "env" ]; then
     ADD_PATHS="$INTERPRETER"
-    INTERPRETER="${SHBANG_LINE#* }" # This is in case there are parameters for the interpreter e.g. #!/usr/bin/env bash -c
-    INTERPRETER="${INTERPRETER%% *}"
-    local W_INTERPRETER="$(which "$INTERPRETER")"
-    if [ "$W_INTERPRETER" != "" ]; then
-      INTERPRETER="$W_INTERPRETER"
+    ENV_APP="${SHBANG_LINE#* }" # This is in case there are parameters for the interpreter e.g. #!/usr/bin/env bash -c
+    ENV_APP="${ENV_APP%% *}"
+    local W_ENV_APP="$(which "$ENV_APP")"
+    if [ "$W_ENV_APP" != "" ]; then
+      ENV_APP="$W_ENV_APP"
     fi
-    ADD_PATHS="${ADD_PATHS}
-$INTERPRETER
-"
   fi
 
   case "$(basename "$INTERPRETER")" in
@@ -360,7 +404,9 @@ $(perl -e "print qq(@INC)" | tr ' ' '\n' | grep -v -e '^/home' -e '^\.')";;
     python) ADD_PATHS="${ADD_PATHS}
 $(python -c 'import sys;print "\n".join(sys.path)' | grep -v -e '^/home' -e '^\.')";;
     bash) ;;
-    python) ;;
+    sh) ;;
+    env)  ADD_PATHS="${ADD_PATHS}
+${ENV_APP}";;
     *)    p_warning "interpreter $INTERPRETER not recognised"
           return 0;;
   esac

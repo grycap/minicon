@@ -185,6 +185,18 @@ function trim() {
   echo "$A"
 }
 
+function build_cmdline() {
+  local SHCMDLINE=""
+  while [ $# -gt 0 ]; do
+    if [ "$1" == "&&" -o "$1" == ">" -o "$1" == ">>" -o "$1" == "2>" -o "$1" == "2>>" -o "$1" == "<" -o "$1" == "<<" ]; then
+      SHCMDLINE="${SHCMDLINE} $1"
+    else
+      SHCMDLINE="${SHCMDLINE} \"$1\""
+    fi
+    shift
+  done
+  echo "$SHCMDLINE"
+}
 function generate_dockerimagename() {
   local NEWNAME
   NEWNAME="$(cat /proc/sys/kernel/random/uuid)"
@@ -307,7 +319,7 @@ NEWNAME=$(correct_dockerimagename "$NEWNAME")
 
 p_out "$NEWNAME"
 
-function build_cmdline() {
+function build_docker_cmdline() {
   local LINES="$1"
   local KW="$2"
 
@@ -345,7 +357,7 @@ while read L; do
     if [ "$JOIN" == "join" ]; then
       RES="$(echo "$RES" | tr '\n' ' ')"
     fi
-    build_cmdline "$RES" "$KW" 
+    build_docker_cmdline "$RES" "$KW" 
   fi
 done <<< "${parameters}"
 

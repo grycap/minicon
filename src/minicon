@@ -21,20 +21,42 @@
 
 function usage() {
   cat <<EOF
+
 minicon aims at reducing the footprint of the filesystem for the container, just adding those 
   files that are needed. That means that the other files in the original container are removed.
 
-$0 <option> <executables to analyze, files or folders to include>
+$0 <option> -- <main execution>
 
   --rootfs | -r       Create the filesystem in a specific folder.
   --tar-file | -t     Generate a tar file that contains the resulting filesystem. This is
                       ideal to import it into docker using the command "docker import". If 
                       not specified the --rootfs parameter, minicon will use a temporary 
                       folder.
-  --exclude | -e <F>  Exclude all paths that begin with 'F' (it accepts texts for regular expressions)
-  --ldconfig | -l     Generate a /etc/ldconfig.so file, adjusted to the new filesystem. 
+  --exclude | -e <F>  Exclude all paths that begin with 'F' (it accepts texts for regular 
+                      expressions). The files are excluded from the final filesystem, but if 
+                      an execution depends on an app in any of these paths, it will be executed 
+                      anyway (e.g. -E '/tmp/myapp' -e '/tmp' will analyze myapp, but will not be
+                      appear in the final filesystem).
+  --no-exclude-common | -C
+                      The default behavior of minicon is to exclude /tmp, /proc and /dev. If you
+                      do not want to exclude them, you should include this flag. The only excluded 
+                      folders will be those included in the commandline.
+  --include | -I <F>  Force to include the file (or folder) pointed by 'F'. Take into account that
+                      --exclude has priority over --include.
+  --execution | -E <cmdline>
+                      Executions to analyze, appart from the main execution (you can include a 
+                      whole execution with parameters between quotes). It can appear as many time
+                      as executions are needed.
+                      This is specially useful for the strace plugin. In other case, the effect 
+                      will be the same of including the command from the execution in the executables 
+                      to analyze. The executions will be made in order of appearance, AFTER the 
+                      main execution.
+  --no-ldconfig | -L  Do not generate the /etc/ldconfig.so file, adjusted to the new filesystem. 
                       It is suggested to always use this flag, to set the proper path to the
                       libraries included in the new filesystem.
+  --ldconfig | -l     (deprecated) generate the /etc/ldconfig.so file, adjusted to the new 
+                      filesystem. This is deprecated because now it is the default behavior if 
+                      flag -L is not used.
   --plugin            Activates some plugins and sets the options for them. The syntax is
                       --plugin=<plugin name>:<parameter>=<value>:<parameter>=<value>...
   --plugin-all        Activates all the available plugins, using their default options.
@@ -43,24 +65,7 @@ $0 <option> <executables to analyze, files or folders to include>
   --verbose | -v      Shows more information about the procedure.
   --debug             Shows a lot more information about the procedure.
   --help | -h         Shows this help and exits.
-  --execution | -E <cmdline>
-                      Execution to analyze (you can include a whole execution between quotes).
-                      This is specially useful for the strace plugin. In other case, the effect
-                      will be the same of including the command from the execution in the executables
-                      to analyze.
 
-  Examples:
-    # The next execution will try to execute the application bash for 3 seconds 
-    # (the default value), but will exclude any file used by the application that 
-    # is found either in /dev or /proc
-
-    $ ./minicon -t tarfile --plugin=strace --exclude /dev --exclude /proc bash
-
-    # The next execution will create a minimal container filesystem that only contains
-    # bash, ls and mkdir. The result can be imported in Docker using the command
-    # (e.g.) docker import minicont.tar test:mini
-    $ docker run --rm --plugin-all -it -v \$PWD:/tmp/minicon \\
-      ubuntu:latest /tmp/minicon/minicon -l -t minicont.tar bash ls mkdir
 EOF
 }
 
@@ -97,6 +102,7 @@ function verify_dependencies() {
 source lib/debug.bash
 source lib/temp.bash
 source lib/config.bash
+source lib/utils.bash
 source plugins.bash
 
 function is_protected() {
@@ -116,7 +122,7 @@ function is_protected() {
 function _build_rsync() {
   local CURRENT="$1"
   local RES=
-  while [ "$CURRENT" != "/" ]; do
+  while [ "$CURRENT" != "/" -a "$CURRENT" != "." -a "$CURRENT" != ".." ]; do
     RES="--include ${CURRENT} ${RES}"
     CURRENT="$(dirname "$CURRENT")"
   done
@@ -128,19 +134,57 @@ function _build_rsync() {
 }
 
 function cp_rsync() {
-  local SRC="$1"
-  local ROOTFS="$2"
+  local SRC ROOTFS RECURSE
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -r) RECURSE=true;;
+      *)  if [ "$SRC" == "" ]; then
+            SRC="$1"
+          else 
+            if [ "$ROOTFS" == "" ]; then
+              ROOTFS="$1"
+            fi
+          fi;;
+    esac
+    shift
+  done
+
+  if [ "${SRC:0:2}" == "./" ]; then
+    SRC="${PWD}${SRC:1}"
+  fi
+
   local SRCDIR="$(dirname "$SRC")"
   DST="$ROOTFS/$SRCDIR"
 
   p_debug "  copying $SRC to $DST"
   p_out "$SRC"
-  rsync -a $(_build_rsync "$SRCDIR") --include "${SRC}" --include "${SRC}/**" --exclude '*' / "$ROOTFS"
+  if [ "$RECURSE" == "true" ]; then
+    rsync -a $(_build_rsync "$SRCDIR") --include "${SRC}" --include "${SRC}/**" --exclude '*' / "$ROOTFS"
+  else
+    rsync -a $(_build_rsync "$SRCDIR") --include "${SRC}" --exclude '*' / "$ROOTFS"
+  fi
 }
 
 function cp_cp() {
-  local SRC="$1"
-  local ROOTFS="$2"
+  local SRC ROOTFS RECURSE
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -r) RECURSE=true;;
+      *)  if [ "$SRC" == "" ]; then
+            SRC="$1"
+          else 
+            if [ "$ROOTFS" == "" ]; then
+              ROOTFS="$1"
+            fi
+          fi;;
+    esac
+    shift
+  done
+
+  if [ "${SRC:0:2}" == "./" ]; then
+    SRC="${PWD}${SRC:1}"
+  fi
+  
   local DST=
   DST="$ROOTFS/$(dirname "$SRC")"
   mkdir -p "$DST"
@@ -148,7 +192,11 @@ function cp_cp() {
   p_debug "  copying $SRC to $DST"
   p_out "$SRC"
   if [ -d "$SRC" ]; then
-    cp -p -n -r "$SRC" "$DST"
+    if [ "$RECURSE" == "true" ]; then
+      cp -p -n -r "$SRC" "$DST"
+    else
+      mkdir -p "${DST}/$(basename "$SRC")"
+    fi
   else
     cp -p -n "$SRC" "$DST"
   fi
@@ -168,6 +216,11 @@ function copy() {
   # copies one file (or folder) to the same destination in the root filesystem
   # - it does not overwrite contents
   local SRC="$1"
+  local RECURSE="$2"
+  if [ "$RECURSE" != "-r" ]; then
+    RECURSE=
+  fi
+
   local n EP
 
   # now check whether it is a link or not... if it is a link, we'll copy the actual file and will create the link
@@ -199,7 +252,7 @@ function copy() {
     p_error 1 "failed to read $SRC"
   fi
 
-  $CP_FUNC "$SRC" "$ROOTFS"
+  $CP_FUNC $RECURSE "$SRC" "$ROOTFS"
 }
 
 # Credits fot this function go to https://stackoverflow.com/a/18898782
@@ -261,6 +314,8 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+LDCONFIGFILE=/etc/ld.so.conf
+MAINEXECUTION=()
 n=0
 while [ $n -lt ${#ARR[@]} ]; do
     PARAM="${ARR[$n]}"
@@ -269,12 +324,16 @@ while [ $n -lt ${#ARR[@]} ]; do
         --plugin=*)             PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED},${PARAM:9}";;
         --exclude|-e)           n=$(($n+1))
                                 EXCLUDED_PATHS+=("${ARR[$n]}");;
+        --no-exclude-common|-C) NOEXCLUDECOMMON=true;;
+        --include|-I)           n=$(($n+1))
+                                COMMANDS_TO_ADD+=("${ARR[$n]}");;
         --logfile|-g)           n=$(($n+1))
                                 LOGFILE="${ARR[$n]}";;
         --quiet|-q)             QUIET=true;;
         --tarfile|-t)           n=$(($n+1))
                                 TARFILE="${ARR[$n]}";;
         --ldconfig|-l)          LDCONFIGFILE=/etc/ld.so.conf;;
+        --no-ldconfig|-L)       LDCONFIGFILE=;;
         --verbose|-v)           VERBOSE=true;;
         --debug)                DEBUG=true;;
         --force|-f)             FORCEFOLDER=true;;
@@ -289,22 +348,40 @@ while [ $n -lt ${#ARR[@]} ]; do
         --)                     n=$(($n+1))
                                 while [ $n -lt ${#ARR[@]} ]; do
                                   PARAM="${ARR[$n]}"
-                                  COMMANDS_TO_ADD+=("$PARAM")
+                                  MAINEXECUTION+=("$PARAM")
                                   n=$(($n+1))
                                 done;;
-        *)                      COMMANDS_TO_ADD+=("$PARAM");;
+        *)                      usage && finalize 1 "unexpected parameter: $PARAM";;
     esac
     n=$(($n+1))
 done
 
 [ "$QUIET" == "true" ] && DEBUG= VERBOSE=
 
+# Exclude the common non-wanted folder (if not prevented)
+if [ "$NOEXCLUDECOMMON" != "true" ]; then
+  EXCLUDED_PATHS+=("/tmp")
+  EXCLUDED_PATHS+=("/dev")
+  EXCLUDED_PATHS+=("/proc")
+fi
+
+# Add the main execution in first place
 CURRENT_CMD=()
+if [ ${#MAINEXECUTION} -gt 0 ]; then
+  EXECUTIONS=("$(build_cmdline "${MAINEXECUTION[@]}")" "${EXECUTIONS[@]}")
+fi
+
+# Now manage the executions
 if [ ${#EXECUTIONS[@]} -gt 0 ]; then
   for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
     arrayze_cmd CURRENT_CMD "${EXECUTIONS[$n]}"
-    p_debug "adding command ${CURRENT_CMD[0]} to analyze"
-    COMMANDS_TO_ADD+=("${CURRENT_CMD[0]}")
+
+    # Remove the possible options to the strace command
+    _CURRENT_CMD="${CURRENT_CMD[0]}"
+    _CURRENT_CMD_N_PATH="${_CURRENT_CMD##*,}"
+    
+    p_debug "adding command ${_CURRENT_CMD_N_PATH} to analyze"
+    COMMANDS_TO_ADD+=("$_CURRENT_CMD_N_PATH")
   done
 fi
 
@@ -337,9 +414,6 @@ verify_dependencies
 
 p_debug "creating $ROOTFS"
 mkdir -p "$ROOTFS"
-mkdir -p "$ROOTFS/tmp"
-mkdir -p "$ROOTFS/dev"
-mkdir -p "$ROOTFS/proc"
 
 if is_plugin_active "strace"; then
   for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do

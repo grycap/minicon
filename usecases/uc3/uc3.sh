@@ -31,6 +31,6 @@ set -x
 express -f ./usecases/uc3/miniapp
 docker build $UCFOLDER -t $REFIMAGE
 docker images $REFIMAGE
-docker run --rm -it -v $MINICONDIR:/tmp/minicon $REFIMAGE /tmp/minicon/minicon -l -t /tmp/minicon/$UCFOLDER/uc${UC}.tar node /usr/src/app
+docker run --rm -it -v $MINICONDIR:/tmp/minicon $REFIMAGE /tmp/minicon/minicon -t /tmp/minicon/$UCFOLDER/uc${UC}.tar -E node -I /usr/src/app
 docker import $MINICONDIR/$UCFOLDER/uc${UC}.tar $MINICONIMAGE
 docker images $MINICONIMAGE

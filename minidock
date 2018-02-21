@@ -450,13 +450,23 @@ ADDEPTOMAINEXEC=true
 
 # If we do not have a main execution, we'll try to use the default command
 if [ "${MAINEXEC}" == "" ]; then
+  MAINEXEC=()
+
+  if [ "$CMDLINE_EP" != "" ]; then
+    ADDEPTOMAINEXEC=false
+    MAINEXEC+=("${CMDLINE_EP[@]}")
+  fi
+
   if [ "$CMDLINE_CMD" != "" ]; then
-    MAINEXEC=("${CMDLINE_CMD[@]}")
+    MAINEXEC+=("${CMDLINE_CMD[@]}")
 
     # If we grab the default command as the main execution, discard the main command
     CMDLINE_CMD=()
-    p_info "using the default command as the main execution"
   fi
+
+  if [ "${MAINEXEC}" != "" ]; then
+    p_info "using the default command as the main execution"
+  fi  
 fi
 
 # If we still do not have a main execution, let's try if the user added additional executions or runs and we'll get the first one as the main one

@@ -37,6 +37,6 @@ EOF
 
 set -x
 docker images $REFIMAGE
-docker run --privileged --rm -it -v $MINICONDIR:/tmp/minicon $REFIMAGE bash -c "apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/$UCFOLDER/uc${UC}.tar -l --plugin=strace:execfile=/tmp/minicon/$UCFOLDER/execfile-cmd bash ssh ip id cat ls mkdir ping wget"
+docker run --privileged --rm -it -v $MINICONDIR:/tmp/minicon $REFIMAGE bash -c "apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/$UCFOLDER/uc${UC}.tar --plugin=strace:execfile=/tmp/minicon/$UCFOLDER/execfile-cmd -E bash -E ssh -E ip -E id -E cat -E ls -E mkdir -E ping -E wget"
 docker import $MINICONDIR/$UCFOLDER/uc${UC}.tar $MINICONIMAGE
 docker images $MINICONIMAGE

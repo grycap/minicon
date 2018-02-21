@@ -26,6 +26,6 @@ MINICONDIR=$(readlink -f $CURDIR/../..)
 
 set -x
 docker images ubuntu:latest
-docker run --rm -it -v $MINICONDIR:/tmp/minicon ubuntu:latest /tmp/minicon/minicon -t /tmp/minicon/$UCFOLDER/uc${UC}.tar bash ls mkdir less cat find
+docker run --rm -it -v $MINICONDIR:/tmp/minicon ubuntu:latest /tmp/minicon/minicon -t /tmp/minicon/$UCFOLDER/uc${UC}.tar -E bash -E ls -E mkdir -E less -E cat -E find
 docker import $MINICONDIR/$UCFOLDER/uc${UC}.tar minicon:uc${UC}
 docker images minicon:uc${UC}

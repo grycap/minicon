@@ -30,6 +30,6 @@ MINICONDIR=$(readlink -f $CURDIR/../..)
 set -x
 docker build $UCFOLDER -t $REFIMAGE
 docker images $REFIMAGE
-docker run --rm -it -v $MINICONDIR:/tmp/minicon $REFIMAGE /tmp/minicon/minicon -l -t /tmp/minicon/$UCFOLDER/uc${UC}.tar ffmpeg
+docker run --rm -it -v $MINICONDIR:/tmp/minicon $REFIMAGE /tmp/minicon/minicon -t /tmp/minicon/$UCFOLDER/uc${UC}.tar -E ffmpeg
 docker import $MINICONDIR/$UCFOLDER/uc${UC}.tar $MINICONIMAGE
 docker images $MINICONIMAGE

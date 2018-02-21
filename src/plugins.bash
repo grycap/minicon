@@ -185,13 +185,15 @@ function analyze_strace_strings() {
 _ALREADY_STRACED=()
 
 function MARK_straced() {
-  _ALREADY_STRACED+=("$1")
+  local CMD="$@"
+  _ALREADY_STRACED+=("$CMD")
 }
 
 function already_straced() {
   local i
+  local CMD="$@"
   for ((i=0;i<${#_ALREADY_STRACED[@]};i=i+1)); do
-    if [ "${_ALREADY_STRACED[$i]}" == "$1" ]; then
+    if [ "${_ALREADY_STRACED[$i]}" == "$CMD" ]; then
       return 0
     fi
   done
@@ -248,12 +250,7 @@ function _strace_exec() {
   STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
     if [ "$L" != "" ]; then
-      BN="$(basename $L)"
-      if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
-        add_command "$L"
-      else
-        copy "$L"
-      fi
+      copy "$L"
     fi
   done <<< "$(analyze_strace_strings "$STRINGS")"
 

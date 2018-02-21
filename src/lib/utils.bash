@@ -18,3 +18,17 @@ function build_cmdline() {
   done
   echo "$SHCMDLINE"
 }
+
+function arrayze_cmd() {
+  # This function creates an array of parameters from a commandline. The special
+  # function of this function is that sometimes parameters are between quotes and the
+  # common space-separation is not valid. This funcion solves the problem of quotes and
+  # then a commandline can be invoked as "${ARRAY[@]}"
+  local AN="$1"
+  local _CMD="$2"
+  local R n=0
+  while read R; do
+    read ${AN}[n] <<< "$R"
+    n=$((n+1))
+  done < <(printf "%s\n" "$_CMD" | xargs -n 1 printf "%s\n")
+}

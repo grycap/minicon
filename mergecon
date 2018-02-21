@@ -31,7 +31,7 @@ $0 <options>
                             the default behaviour gives more priority to the second image. I.e. in
                             case of overlapping files in both input images, the files in the second
                             image will be exposed to the final image.
-  --name | -n <name>        name of the resulting container image. If not provided, the resulting
+  --tag | -t <name>         name of the resulting container image. If not provided, the resulting
                             name will be the concatenation of the names of the two input images:
                             <image1>:<image2> (the : in the input image names is removed).
   --working | -w <folder>   working folder. If not provided will create a temporary folder in /tmp
@@ -165,6 +165,57 @@ function tempdir() {
   done
   echo $RES
 }
+function generate_dockerimagename() {
+  local NEWNAME
+  NEWNAME="$(cat /proc/sys/kernel/random/uuid)"
+  NEWNAME="${NEWNAME%%-*}"
+  echo "$NEWNAME"
+}
+
+function correct_dockerimagename() {
+  local IMNAME="$1"
+  local BASE TAG
+
+  # Correct NEWNAME
+  IFS=':' read BASE TAG <<< "${IMNAME}"
+  if [ "$TAG" == "" ]; then
+    IMNAME="${IMNAME}:latest"
+  fi
+  echo "$IMNAME"
+}
+
+_INSPECT_STRING=
+_INSPECT_IMAGE=
+function get_config_field() {
+  local IMAGE="$1"
+  local FIELD="$2"
+  local RAW_JQ="$3"
+  local C_RESULT
+
+  if [ "$_INSPECT_IMAGE" != "$IMAGE" ]; then
+    _INSPECT_STRING="$(docker inspect $IMAGE)"
+    _INSPECT_IMAGE="$IMAGE"
+  fi
+
+  C_RESULT="$(echo "$_INSPECT_STRING" | jq -r "if .[].Config.${FIELD} != null then if .[].Config.${FIELD}${RAW_JQ} | type == \"array\" then .[].Config.${FIELD}${RAW_JQ} | .[] else .[].Config.${FIELD}${RAW_JQ} end else null end")"
+  echo "$(trim "$C_RESULT")"
+}
+
+function get_config_field_raw() {
+  local IMAGE="$1"
+  local FIELD="$2"
+  local RAW_JQ="$3"
+  local C_RESULT
+
+  if [ "$_INSPECT_IMAGE" != "$IMAGE" ]; then
+    _INSPECT_STRING="$(docker inspect $IMAGE)"
+    _INSPECT_IMAGE="$IMAGE"
+  fi
+
+  C_RESULT="$(echo "$_INSPECT_STRING" | jq -r "if .[].Config.${FIELD} != null then .[].Config.${FIELD}${RAW_JQ} else null end")"
+  echo "$(trim "$C_RESULT")"
+}
+
 
 function verify_dependencies() {
   if ! docker --version > /dev/null 2> /dev/null; then
@@ -245,7 +296,7 @@ while [ $n -lt ${#ARR[@]} ]; do
         --continue|-c)          CONTINUE=true;;
         --working|-w)           n=$(($n+1))
                                 TMPDIR="${ARR[$n]}";;
-        --name|-n)              n=$(($n+1))
+        --tag|-t)               n=$(($n+1))
                                 MERGEDNAME="${ARR[$n]}";;
         --first|-1)             n=$(($n+1))
                                 FIRSTIMAGE="${ARR[$n]}";;
@@ -274,16 +325,15 @@ else
   KEEPTEMPORARY=false
 fi
 
+FIRSTIMAGE=$(correct_dockerimagename "$FIRSTIMAGE")
+SECONDIMAGE=$(correct_dockerimagename "$SECONDIMAGE")
+
 if [ "$MERGEDNAME" == "" ]; then
-  MERGEDNAME="$(cat /proc/sys/kernel/random/uuid)"
-  MERGEDNAME="${MERGEDNAME%%-*}"
+  MERGEDNAME="$(generate_dockerimagename)"
 fi
 
-# Correct MERGEDNAME
-IFS=':' read BASE TAG <<< "${MERGEDNAME}"
-if [ "$TAG" == "" ]; then
-  MERGEDNAME="${MERGEDNAME}:latest"
-fi
+MERGEDNAME=$(correct_dockerimagename "$MERGEDNAME")
+p_debug "merging layers of image $SECONDIMAGE in $FIRSTIMAGE, into $MERGEDNAME"
 p_out "$MERGEDNAME"
 
 cd $TMPDIR 2> /dev/null || finalize 1 "could not change to folder $TMPDIR"

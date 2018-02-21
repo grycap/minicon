@@ -178,7 +178,7 @@ done <<< "${parameters}"
 p_debug docker import "${CMDLINE[@]}" "$FILENAME" "$NEWNAME"
 
 if [ "$SIMULATEONLY" != "true" ]; then
-  docker import "${CMDLINE[@]}" "$FILENAME" "$NEWNAME"
+  docker import "${CMDLINE[@]}" "$FILENAME" "$NEWNAME" > /dev/null
 else
   p_warning "not executed because of commandline options"
 fi

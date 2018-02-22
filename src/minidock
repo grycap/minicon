@@ -234,9 +234,9 @@ if [ "$DEPENDENCIES_APT" == "true" ]; then
 else
   if [ "$DEPENDENCIES_YUM" == "true" ]; then
     if [ "$DEBUG" == "true" ]; then
-      DEPENDENCIES="$(build_cmdline yum install -y install bash tar rsync file strace which \&\&)"
+      DEPENDENCIES="$(build_cmdline yum install -y bash tar rsync file strace which \&\&)"
     else
-      DEPENDENCIES="$(build_cmdline yum install -y install bash tar rsync file strace which \> /dev/null 2\> /dev/null \&\&)"
+      DEPENDENCIES="$(build_cmdline yum install -y bash tar rsync file strace which \> /dev/null 2\> /dev/null \&\&)"
     fi
   fi
 fi
@@ -335,13 +335,13 @@ fi
 MINICONOPTS+=("--")
 MINICONOPTS+=("${MAINEXEC[@]}")
 
-p_debug docker run --rm -it $MINICONFOLDER $WORKINGFOLDER --entrypoint "" "${DOCKEROPTS[@]}" "$FROMIMAGE" \
+p_debug docker run --rm $MINICONFOLDER $WORKINGFOLDER --entrypoint "" "${DOCKEROPTS[@]}" "$FROMIMAGE" \
   sh -c "${DEPENDENCIES}$(build_cmdline "$REMOTEMINICON" "-t" "$REMOTEWORKING/image.tar" "${MINICONOPTS[@]}")"
 
 if [ "$SIMULATEONLY" == "true" ]; then
   p_warning "not executing because only wanted to simulate"
 else
-  docker run --rm -it $MINICONFOLDER $WORKINGFOLDER --entrypoint "" "${DOCKEROPTS[@]}" "$FROMIMAGE" \
+  docker run --rm $MINICONFOLDER $WORKINGFOLDER --entrypoint "" "${DOCKEROPTS[@]}" "$FROMIMAGE" \
     sh -c "${DEPENDENCIES}$(build_cmdline "$REMOTEMINICON" "-t" "$REMOTEWORKING/image.tar" "${MINICONOPTS[@]}")"
 
   if [ $? -ne 0 ]; then

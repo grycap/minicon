@@ -1,8 +1,8 @@
 # Manipulation of Container Filesystems
 
-This file explains [**minicon**](#1-minicon---minimization-of-the-filesystems-for-containers), [**mergecon**](#2-mergecon---merge-container-filesystems) and [**importcon**](#3-importcon---import-container-copying-features):
+This file explains [**minidock**](#1-minidock---minimization-of-docker-containers), [**minicon**](#1-minicon---minimization-of-the-filesystems-for-containers), [**mergecon**](#2-mergecon---merge-container-filesystems) and [**importcon**](#3-importcon---import-container-copying-features):
 
-1. **minidock** ([direct link]()) analyzes one existing Docker image, reduces its footprint and leaves the new version in the local Docker registry. It makes use of the other tools in the _minicon_ package.
+1. **minidock** ([direct link](#1-minidock---minimization-of-docker-containers)) analyzes one existing Docker image, reduces its footprint and leaves the new version in the local Docker registry. It makes use of the other tools in the _minicon_ package.
 
 1. **minicon** ([direct link](#2-minicon---minimization-of-the-filesystems-for-containers)) aims at reducing the footprint of the filesystem for the container, just adding those files that are needed. That means that the other files in the original container are removed.
 
@@ -19,7 +19,7 @@ When you run Docker containers, you usually run a system that has a whole Operat
 The purpose of **minidock** is better understood with the use cases explained in depth in the section "[Examples](#14-examples)": the size of an Apache server is reduced from 216MB. to 50.4MB., and the size of a Perl application in a Docker container is reduced from 206MB to 50.4MB.
 
 
-> **minidock** is based on [**minicon**](#1-minicon---minimization-of-the-filesystems-for-containers), [**importcon**](#3-importcon---import-container-copying-features) and [**mergecon**](#2-mergecon---merge-container-filesystems), and hides the complexity of creating a container, mapping minicon, guessing parameters such as the entrypoint or the default command, creating the proper commandline, etc.
+> [**minidock**](#1-minidock---minimization-of-docker-containers) is based on [**minicon**](#2-minicon---minimization-of-the-filesystems-for-containers), [**importcon**](#3-importcon---import-container-copying-features) and [**mergecon**](#4-mergecon---merge-container-filesystems), and hides the complexity of creating a container, mapping minicon, guessing parameters such as the entrypoint or the default command, creating the proper commandline, etc.
 
 ## 1.1 Why **minidock**?
 

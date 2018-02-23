@@ -13,6 +13,7 @@ function plugin_parameter() {
         if [ "$K" == "$PARAMETER" ]; then
           p_debug "found param $K with value $V"
           echo "$V"
+          return 0
         fi
       done <<< "${PARAMS}:"
     fi
@@ -200,6 +201,31 @@ function already_straced() {
   return 1
 }
 
+function _strace_mode() {
+  local MODE=default
+  local P_MODE=
+  P_MODE=$(plugin_parameter "strace" "loose")
+  if [ $? -eq 0 ]; then
+    MODE=loose
+  fi
+
+  P_MODE=$(plugin_parameter "strace" "slim")
+  if [ $? -eq 0 ]; then
+    MODE=slim
+  fi
+
+  P_MODE=$(plugin_parameter "strace" "skinny")
+  if [ $? -eq 0 ]; then
+    MODE=skinny
+  fi
+
+  if [ "$MODE" == "default" ]; then
+    MODE=skinny
+  fi
+
+  echo "$MODE"
+}
+
 function _strace_exec() {  
   if already_straced "${COMMAND[@]}"; then
     p_debug "command ${COMMAND[@]} already straced"
@@ -217,7 +243,9 @@ function _strace_exec() {
     SECONDSSIM=3
   fi
 
-  p_info "analysing ${COMMAND[@]} using strace and $SECONDSSIM seconds"
+  local MODE="$(_strace_mode)"
+
+  p_info "analysing ${COMMAND[@]} using strace and $SECONDSSIM seconds ($MODE)"
 
   local TMPFILE=$(tempfile)
   {
@@ -225,38 +253,71 @@ function _strace_exec() {
   } > /dev/null 2> /dev/null
 
   # Now we'll inspect the files that the execution has used
-  local FUNCTIONS
+  local EXEC_FUNCTIONS="exec.*"
   local STRINGS
   local L BN
 
-  # Add all the folders and files that are used (folders are included as a whole and the
-  # library are also analyzed)
-  FUNCTIONS="open|mkdir"
-  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  # Add all the folders and files that are used, but analyze libraries or executable files
+  #FUNCTIONS="open|mkdir"
+  #STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  #while read L; do
+  #  if [ "$L" != "" ]; then
+  #    BN="$(basename $L)"
+  #    if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
+  #      add_command "$L"
+  #    else
+  #      copy "$L" -r
+  #    fi
+  #  fi
+  #done <<< "$(analyze_strace_strings "$STRINGS")"
+
+  # Add all the folders and files that checked to exist (folders are not copied, just may
+  # appear in the resulting filesystem, but libraries are analyzed)
+  # FUNCTIONS="stat|lstat"
+  STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
-    if [ "$L" != "" ]; then
-      BN="$(basename $L)"
-      if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
-        add_command "$L"
+    if [ "$L" != "" -a "$L" != "/" -a "$L" != "." -a "$L" != ".." ]; then
+      if [ -f "$L" ]; then
+        BN="$(basename $L)"
+        if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
+          add_command "$L"
+        else
+          copy "$L"
+        fi
       else
-        copy "$L" -r
+        copy "$L"
       fi
     fi
   done <<< "$(analyze_strace_strings "$STRINGS")"
 
-  # Add all the folders and files that checked to exist (folders are not copied, just may
-  # appear in the resulting filesystem, but libraries are analyzed)
-  FUNCTIONS="stat"
-  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
-  while read L; do
-    if [ "$L" != "" ]; then
-      copy "$L"
-    fi
-  done <<< "$(analyze_strace_strings "$STRINGS")"
+  # If the mode is slim, we'll also copy the whole opened (or created) folders
+  if [ "$MODE" == "slim" ]; then
+    local FUNCTIONS="open|mkdir"
+    STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+    while read L; do
+      if [ "$L" != "" ]; then
+        if [ -d "$L" ]; then
+          copy "$L" -r
+        fi
+      fi
+    done <<< "$(analyze_strace_strings "$STRINGS")"
+  fi
+
+  # If the mode is not skinny, we'll copy the whole folders used
+  if [ "$MODE" == "loose" ]; then
+    STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+    while read L; do
+      if [ "$L" != "" ]; then
+        if [ -d "$L" ]; then
+          copy "$L" -r
+        fi
+      fi
+    done <<< "$(analyze_strace_strings "$STRINGS")"
+  fi
 
   # Add all the executables that have been executed (they are analyzed).
-  FUNCTIONS="exec.*"
-  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  # FUNCTIONS="exec.*"
+  STRINGS="$(cat "$TMPFILE" | grep -E "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
     [ "$L" != "" ] && add_command "$L"
   done <<< "$(analyze_strace_strings "$STRINGS")"

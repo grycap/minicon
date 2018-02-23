@@ -321,8 +321,8 @@ TMPDIR=
 IMPORTCONOPTS=()
 MERGECONOPTS=()
 
-# The strace plugin needs the container to be privileged
-DOCKEROPTS=("--privileged")
+# The strace plugin needs the ability of process tracking (or privileged, but we do not want too much permissions)
+DOCKEROPTS=("--cap-add" "SYS_PTRACE")
 
 # minidock runs minicon with all the plugins activated
 MINICONOPTS=("--plugin-all")

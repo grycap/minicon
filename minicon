@@ -41,8 +41,8 @@ $0 <option> -- <main execution>
                       The default behavior of minicon is to exclude /tmp, /proc and /dev. If you
                       do not want to exclude them, you should include this flag. The only excluded 
                       folders will be those included in the commandline.
-  --include | -I <F>  Force to include the file (or folder) pointed by 'F'. Take into account that
-                      --exclude has priority over --include.
+  --include | -I <F>  Force to consider the file (or folder) pointed by 'F'. Take into account that
+                      --include has priority over --exclude.
   --execution | -E <cmdline>
                       Executions to analyze, appart from the main execution (you can include a 
                       whole execution with parameters between quotes). It can appear as many time
@@ -296,6 +296,7 @@ function plugin_parameter() {
         if [ "$K" == "$PARAMETER" ]; then
           p_debug "found param $K with value $V"
           echo "$V"
+          return 0
         fi
       done <<< "${PARAMS}:"
     fi
@@ -483,6 +484,31 @@ function already_straced() {
   return 1
 }
 
+function _strace_mode() {
+  local MODE=default
+  local P_MODE=
+  P_MODE=$(plugin_parameter "strace" "loose")
+  if [ $? -eq 0 ]; then
+    MODE=loose
+  fi
+
+  P_MODE=$(plugin_parameter "strace" "slim")
+  if [ $? -eq 0 ]; then
+    MODE=slim
+  fi
+
+  P_MODE=$(plugin_parameter "strace" "skinny")
+  if [ $? -eq 0 ]; then
+    MODE=skinny
+  fi
+
+  if [ "$MODE" == "default" ]; then
+    MODE=skinny
+  fi
+
+  echo "$MODE"
+}
+
 function _strace_exec() {  
   if already_straced "${COMMAND[@]}"; then
     p_debug "command ${COMMAND[@]} already straced"
@@ -500,7 +526,9 @@ function _strace_exec() {
     SECONDSSIM=3
   fi
 
-  p_info "analysing ${COMMAND[@]} using strace and $SECONDSSIM seconds"
+  local MODE="$(_strace_mode)"
+
+  p_info "analysing ${COMMAND[@]} using strace and $SECONDSSIM seconds ($MODE)"
 
   local TMPFILE=$(tempfile)
   {
@@ -508,38 +536,71 @@ function _strace_exec() {
   } > /dev/null 2> /dev/null
 
   # Now we'll inspect the files that the execution has used
-  local FUNCTIONS
+  local EXEC_FUNCTIONS="exec.*"
   local STRINGS
   local L BN
 
-  # Add all the folders and files that are used (folders are included as a whole and the
-  # library are also analyzed)
-  FUNCTIONS="open|mkdir"
-  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  # Add all the folders and files that are used, but analyze libraries or executable files
+  #FUNCTIONS="open|mkdir"
+  #STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  #while read L; do
+  #  if [ "$L" != "" ]; then
+  #    BN="$(basename $L)"
+  #    if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
+  #      add_command "$L"
+  #    else
+  #      copy "$L" -r
+  #    fi
+  #  fi
+  #done <<< "$(analyze_strace_strings "$STRINGS")"
+
+  # Add all the folders and files that checked to exist (folders are not copied, just may
+  # appear in the resulting filesystem, but libraries are analyzed)
+  # FUNCTIONS="stat|lstat"
+  STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
-    if [ "$L" != "" ]; then
-      BN="$(basename $L)"
-      if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
-        add_command "$L"
+    if [ "$L" != "" -a "$L" != "/" -a "$L" != "." -a "$L" != ".." ]; then
+      if [ -f "$L" ]; then
+        BN="$(basename $L)"
+        if [ "${BN::3}" == "lib" -o "${BN: -3}" == ".so" ]; then
+          add_command "$L"
+        else
+          copy "$L"
+        fi
       else
-        copy "$L" -r
+        copy "$L"
       fi
     fi
   done <<< "$(analyze_strace_strings "$STRINGS")"
 
-  # Add all the folders and files that checked to exist (folders are not copied, just may
-  # appear in the resulting filesystem, but libraries are analyzed)
-  FUNCTIONS="stat"
-  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
-  while read L; do
-    if [ "$L" != "" ]; then
-      copy "$L"
-    fi
-  done <<< "$(analyze_strace_strings "$STRINGS")"
+  # If the mode is slim, we'll also copy the whole opened (or created) folders
+  if [ "$MODE" == "slim" ]; then
+    local FUNCTIONS="open|mkdir"
+    STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+    while read L; do
+      if [ "$L" != "" ]; then
+        if [ -d "$L" ]; then
+          copy "$L" -r
+        fi
+      fi
+    done <<< "$(analyze_strace_strings "$STRINGS")"
+  fi
+
+  # If the mode is not skinny, we'll copy the whole folders used
+  if [ "$MODE" == "loose" ]; then
+    STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+    while read L; do
+      if [ "$L" != "" ]; then
+        if [ -d "$L" ]; then
+          copy "$L" -r
+        fi
+      fi
+    done <<< "$(analyze_strace_strings "$STRINGS")"
+  fi
 
   # Add all the executables that have been executed (they are analyzed).
-  FUNCTIONS="exec.*"
-  STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+  # FUNCTIONS="exec.*"
+  STRINGS="$(cat "$TMPFILE" | grep -E "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
     [ "$L" != "" ] && add_command "$L"
   done <<< "$(analyze_strace_strings "$STRINGS")"
@@ -740,11 +801,12 @@ function cp_rsync() {
   local SRCDIR="$(dirname "$SRC")"
   DST="$ROOTFS/$SRCDIR"
 
-  p_debug "  copying $SRC to $DST"
   p_out "$SRC"
   if [ "$RECURSE" == "true" ]; then
+    p_debug "copying $SRC to $DST (recurse)"
     rsync -a $(_build_rsync "$SRCDIR") --include "${SRC}" --include "${SRC}/**" --exclude '*' / "$ROOTFS"
   else
+    p_debug "copying $SRC to $DST"
     rsync -a $(_build_rsync "$SRCDIR") --include "${SRC}" --exclude '*' / "$ROOTFS"
   fi
 }
@@ -762,15 +824,17 @@ function cp_cp() {
   DST="$ROOTFS/$(dirname "$SRC")"
   mkdir -p "$DST"
   
-  p_debug "  copying $SRC to $DST"
   p_out "$SRC"
   if [ -d "$SRC" ]; then
     if [ "$RECURSE" == "true" ]; then
+      p_debug "copying $SRC to $DST (recurse)"
       cp -p -n -r "$SRC" "$DST"
     else
+      p_debug "copying $SRC to $DST (mkdir)"
       mkdir -p "${DST}/$(basename "$SRC")"
     fi
   else
+    p_debug "copying $SRC to $DST"
     cp -p -n "$SRC" "$DST"
   fi
 }
@@ -788,7 +852,7 @@ function cp_wrapper() {
     fi
   fi
 
-  local SRC ROOTFS RECURSE
+  local SRC ROOTFS RECURSE=false
   while [ $# -gt 0 ]; do
     case "$1" in
       -r) RECURSE=true;;
@@ -803,17 +867,19 @@ function cp_wrapper() {
     shift
   done
   
-  local EXISTING="$(echo "$_FILES_COPIED" | grep "^${SRC}$")"
-  if [ "$EXISTING" == "$SRC" ]; then
+  local EXISTING
+  EXISTING="$(echo "$_FILES_COPIED" | grep "^[tf]:${SRC}$")"
+  local METHOD="${EXISTING:0:1}"
+  EXISTING="${EXISTING:2}"
+  if [ "$EXISTING" == "$SRC" -a "${METHOD}" == "${RECURSE:0:1}" ]; then
     p_debug "skipping file $SRC because it has been already copied"
     return
   fi
 
   $CP_FUNC "$SRC" "$ROOTFS" "$RECURSE"
   _FILES_COPIED="${_FILES_COPIED}
-${SRC}"
+${RECURSE:0:1}:${SRC}"
 }
-
 
 function copy() {
   # copies one file (or folder) to the same destination in the root filesystem
@@ -834,13 +900,26 @@ function copy() {
     return 0
   fi
 
-  for ((n=0;n<${#EXCLUDED_PATHS[@]};n++)); do
-    EP="${EXCLUDED_PATHS[$n]}"
+  local ALREADY_INCLUDED=false
+
+  for ((n=0;n<${#INCLUDED_PATHS[@]};n++)); do
+    EP="${INCLUDED_PATHS[$n]}"
     if [[ "$SRC" =~ ^$EP ]]; then
-      p_info "excluding ${SRC} because it matches pattern ${EP}"
-      return 0
+      p_info "including ${SRC} because it matches pattern ${EP}"
+      ALREADY_INCLUDED=true
+      break
     fi
   done
+
+  if [ "$ALREADY_INCLUDED" == "false" ]; then
+    for ((n=0;n<${#EXCLUDED_PATHS[@]};n++)); do
+      EP="${EXCLUDED_PATHS[$n]}"
+      if [[ "$SRC" =~ ^$EP ]]; then
+        p_info "excluding ${SRC} because it matches pattern ${EP}"
+        return 0
+      fi
+    done
+  fi
 
   if [ "$SRC" == "." -o "$SRC" == ".." ]; then
     p_warning "cowardly refusing to copy folder $SRC"
@@ -898,6 +977,7 @@ function add_command() {
 
 # Now we are activating the basic plugins
 EXCLUDED_PATHS=()
+INCLUDED_PATHS=()
 PLUGINS_ACTIVATED=link,which,folder,ldd,scripts
 COMMANDS_TO_ADD=()
 EXECUTIONS=()
@@ -929,7 +1009,7 @@ while [ $n -lt ${#ARR[@]} ]; do
                                 EXCLUDED_PATHS+=("${ARR[$n]}");;
         --no-exclude-common|-C) NOEXCLUDECOMMON=true;;
         --include|-I)           n=$(($n+1))
-                                COMMANDS_TO_ADD+=("${ARR[$n]}");;
+                                INCLUDED_PATHS+=("${ARR[$n]}");;
         --logfile|-g)           n=$(($n+1))
                                 LOGFILE="${ARR[$n]}";;
         --quiet|-q)             QUIET=true;;
@@ -984,7 +1064,7 @@ if [ ${#EXECUTIONS[@]} -gt 0 ]; then
     _CURRENT_CMD_N_PATH="${_CURRENT_CMD##*,}"
     
     p_debug "adding command ${_CURRENT_CMD_N_PATH} to analyze"
-    COMMANDS_TO_ADD+=("$_CURRENT_CMD_N_PATH")
+    add_command "$_CURRENT_CMD_N_PATH"
   done
 fi
 
@@ -1018,11 +1098,19 @@ verify_dependencies
 p_debug "creating $ROOTFS"
 mkdir -p "$ROOTFS"
 
+p_info "copying forced paths"
+
+for ((n=0;n<${#INCLUDED_PATHS[@]};n=n+1)); do
+  copy "${INCLUDED_PATHS[$n]}"
+done
+
 if is_plugin_active "strace"; then
   for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
     STRACE_command "${EXECUTIONS[$n]}"
   done
 fi
+
+p_info "analyzing..."
 
 i_current=0
 while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do

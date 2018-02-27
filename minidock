@@ -73,6 +73,7 @@ $0 <options> <options for minicon> [ --docker-opts <options for docker> ] -- <ru
   -2 <image>                If needed, you can merge the resulting minimized image with other. This is very specific
                             for the "mergecon" tool. It is useful for (e.g.) adding a minimal Alpine distro (with
                             ash and so on) to the minimized filesystem.
+  --version | -V            Shows the version number and finalizes.
   --verbose | -v            Shows more information about the procedure.
   --debug                   Shows a lot more information about the procedure.
   --help | -h               Shows this help and exits.
@@ -313,6 +314,7 @@ function get_config_field_raw() {
   echo "$(trim "$C_RESULT")"
 }
 
+VERSION=1.2-1
 
 n=0
 while [ $# -gt 0 ]; do
@@ -385,6 +387,7 @@ while [ $n -lt ${#ARR[@]} ]; do
                                 IMPORTCONOPTS+=("--debug")
                                 MERGECONOPTS+=("--debug")
                                 DEBUG=true;;
+        --version | -V)         echo "$VERSION" && finalize;;
         --help | -h)            usage && finalize;;
         --keeptemporary|-k)     KEEPTEMPORARY="true";;
         --docker-opts)          n=$(($n+1))

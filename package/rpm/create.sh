@@ -23,7 +23,10 @@ SRCFOLDER=$1
 if [ "$SRCFOLDER" == "" ]; then
   SRCFOLDER="."
 fi
-VERSION=$(cat "$SRCFOLDER/version")
+# VERSION=$(cat "$SRCFOLDER/version")
+
+source "$SRCFOLDER/version"
+
 if [ $? -ne 0 ]; then
   echo "could not find the version for the package"
   exit 1

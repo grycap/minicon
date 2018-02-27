@@ -62,6 +62,7 @@ $0 <option> -- <main execution>
   --plugin-all        Activates all the available plugins, using their default options.
   --logfile | -g <F>  Outputs the information in file F instead of stdout and stderr
   --quiet | -q        Makes the tasks silently
+  --version | -V      Shows the version number and finalizes.
   --verbose | -v      Shows more information about the procedure.
   --debug             Shows a lot more information about the procedure.
   --help | -h         Shows this help and exits.
@@ -650,7 +651,7 @@ function _strace_exec() {
   fi
 
   # If the mode is regular, we'll copy the whole folders used
-  if [ "$MODE" == "regular" -o "$MODE" == "loose" ]; then
+  if [ "$MODE" == "loose" ]; then
     push_logger "COPYDIRS"
     STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
     while read L; do
@@ -664,9 +665,8 @@ function _strace_exec() {
     pop_logger
   fi
 
-
   # If the mode is slim, we'll also copy the whole opened (or created) folders
-  if [ "$MODE" == "loose" ]; then
+  if [ "$MODE" == "regular" -o "$MODE" == "loose" ]; then
     push_logger "DIRSFROMFILES"
     local FUNCTIONS="open"
     STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
@@ -848,6 +848,7 @@ function plugin_list() {
   done <<< "$(PLUGIN_funcs)"
   echo
 }
+VERSION=1.2-1
 
 function is_protected() {
   local SRC="$1"
@@ -1115,6 +1116,7 @@ while [ $n -lt ${#ARR[@]} ]; do
                                 fi;;
         --execution|-E)         n=$(($n+1))
                                 EXECUTIONS+=("${ARR[$n]}");;
+        --version | -V)         echo "$VERSION" && finalize;;
         --help | -h)            usage && finalize;;
         --)                     n=$(($n+1))
                                 while [ $n -lt ${#ARR[@]} ]; do

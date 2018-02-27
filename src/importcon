@@ -42,6 +42,7 @@ $0 <options> <container filesystem in tar file>
                             ONBUILD, USER, VOLUME, WORKDIR and CMD.
   --keeptemporary | -k      Keeps the temporary folder. Otherwise, the folder is removed (if it is
                             created by mergecon).
+  --version | -V            Shows the version number and finalizes.
   --verbose | -v            Shows more information about the procedure.
   --debug                   Shows a lot more information about the procedure.
   --help | -h               Shows this help and exits.
@@ -62,6 +63,7 @@ source lib/debug.bash
 source lib/temp.bash
 source lib/utils.bash
 source lib/dockerutils.bash
+source version
 
 n=0
 while [ $# -gt 0 ]; do
@@ -106,6 +108,7 @@ while [ $n -lt ${#ARR[@]} ]; do
         --simulate|-s)          SIMULATEONLY=true;;
         --verbose|-v)           VERBOSE=true;;
         --debug)                DEBUG=true;;
+        --version | -V)         echo "$VERSION" && finalize;;
         --help | -h)            usage && finalize;;
         --keeptemporary|-k)     KEEPTEMPORARY="true";;
         *)                      [ "$FILENAME" != "" ] && usage && finalize 1 "invalid parameter $PARAM. already provided a filename"

@@ -387,6 +387,7 @@ done
 
 # Exclude the common non-wanted folder (if not prevented)
 if [ "$NOEXCLUDECOMMON" != "true" ]; then
+  EXCLUDED_PATHS+=("/sys")
   EXCLUDED_PATHS+=("/tmp")
   EXCLUDED_PATHS+=("/dev")
   EXCLUDED_PATHS+=("/proc")
@@ -466,8 +467,7 @@ while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do
       set_logger "${_C_PLUGIN^^}"
       if ! $p "$CURRENT_CMD"; then
         break
-      fi 
-      set_logger
+      fi
     fi
   done
   set_logger

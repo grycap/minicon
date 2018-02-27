@@ -170,6 +170,17 @@ function set_logger() {
   fi
 }
 
+_OLD_LOGGER=
+
+function push_logger() {
+  _OLD_LOGGER="$LOGGER"
+  LOGGER="$LOGGER[$1]"
+}
+
+function pop_logger() {
+  LOGGER="$_OLD_LOGGER"
+}
+
 function finalize() {
   # Finalizes the execution of the this script and shows an error (if provided)
   local ERR=$1
@@ -348,6 +359,11 @@ while [ $n -lt ${#ARR[@]} ]; do
                                 MINICONOPTS+=("$PARAM")
                                 n=$(($n+1))
                                 MINICONOPTS+=("${ARR[$n]}");;
+        --mode=*)               MINICONOPTS+=("--plugin=strace:mode=${PARAM:7}")
+                                ;;
+        --mode)                 n=$(($n+1))
+                                MINICONOPTS+=("--plugin=strace:mode=${ARR[$n]}")
+                                ;;
         --execution|-E)         n=$(($n+1))
                                 SECONDARYEXECS+=("-E")
                                 SECONDARYEXECS+=("${ARR[$n]}");;

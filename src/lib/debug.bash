@@ -70,6 +70,17 @@ function set_logger() {
   fi
 }
 
+_OLD_LOGGER=
+
+function push_logger() {
+  _OLD_LOGGER="$LOGGER"
+  LOGGER="$LOGGER[$1]"
+}
+
+function pop_logger() {
+  LOGGER="$_OLD_LOGGER"
+}
+
 function finalize() {
   # Finalizes the execution of the this script and shows an error (if provided)
   local ERR=$1

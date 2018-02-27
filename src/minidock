@@ -148,6 +148,11 @@ while [ $n -lt ${#ARR[@]} ]; do
                                 MINICONOPTS+=("$PARAM")
                                 n=$(($n+1))
                                 MINICONOPTS+=("${ARR[$n]}");;
+        --mode=*)               MINICONOPTS+=("--plugin=strace:mode=${PARAM:7}")
+                                ;;
+        --mode)                 n=$(($n+1))
+                                MINICONOPTS+=("--plugin=strace:mode=${ARR[$n]}")
+                                ;;
         --execution|-E)         n=$(($n+1))
                                 SECONDARYEXECS+=("-E")
                                 SECONDARYEXECS+=("${ARR[$n]}");;

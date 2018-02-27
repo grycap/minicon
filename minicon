@@ -171,6 +171,17 @@ function set_logger() {
   fi
 }
 
+_OLD_LOGGER=
+
+function push_logger() {
+  _OLD_LOGGER="$LOGGER"
+  LOGGER="$LOGGER[$1]"
+}
+
+function pop_logger() {
+  LOGGER="$_OLD_LOGGER"
+}
+
 function finalize() {
   # Finalizes the execution of the this script and shows an error (if provided)
   local ERR=$1
@@ -485,31 +496,73 @@ function already_straced() {
 }
 
 function _strace_mode() {
-  local MODE=default
-  local P_MODE=
-  P_MODE=$(plugin_parameter "strace" "loose")
-  if [ $? -eq 0 ]; then
-    MODE=loose
-  fi
-
-  P_MODE=$(plugin_parameter "strace" "slim")
-  if [ $? -eq 0 ]; then
-    MODE=slim
-  fi
-
-  P_MODE=$(plugin_parameter "strace" "skinny")
-  if [ $? -eq 0 ]; then
-    MODE=skinny
-  fi
-
+  local MODE="$(plugin_parameter "strace" "mode")"
+  local ERR=0
+  case "$MODE" in
+    loose|regular|slim|skinny|default) 
+        ;;
+    "") MODE=default;;
+    *)  p_error "invalid mode '$MODE' for strace"
+        MODE=
+        ERR=1;;
+  esac
   if [ "$MODE" == "default" ]; then
     MODE=skinny
   fi
-
   echo "$MODE"
+  return $ERR
+}
+
+function _strace_copy_folder() {
+  local _FILE="$1"
+  local _STRACE_EXCLUDED_PATHS='
+^//$
+^\./$
+^\.\./$
+^/tmp/$
+^/boot/$
+^/home/$
+^/sys/
+^/usr/lib(32|64|)/
+^/lib(32|64|)/
+^/etc/$
+^/var/$
+^/proc/$
+^/dev/$
+^/usr/$
+^/bin/$
+^/usr/bin/$
+^/sbin/$
+^/usr/sbin/$
+'
+
+  local DN
+  if [ -f "$_FILE" ]; then
+    DN="$(dirname "$_FILE")/"
+  else
+    DN="$(realpath -Lsm "$_FILE")/"
+  fi
+
+  if [ ! -d "$DN" ]; then
+    return 1
+  fi
+
+  while read EP; do
+    if [ "$EP" != "" ]; then
+      if [[ "$DN" =~ $EP ]]; then
+        p_debug "excluding ${DN} because it matches pattern ${EP}"
+        return 0
+      fi
+    fi
+  done <<< "$_STRACE_EXCLUDED_PATHS"
+
+  p_debug "copying $DN because $_FILE is in it"
+  copy "$DN" -r
+  return 0
 }
 
 function _strace_exec() {  
+
   if already_straced "${COMMAND[@]}"; then
     p_debug "command ${COMMAND[@]} already straced"
     return
@@ -526,7 +579,12 @@ function _strace_exec() {
     SECONDSSIM=3
   fi
 
-  local MODE="$(_strace_mode)"
+  local MODE
+  MODE="$(_strace_mode)"
+
+  if [ $? -ne 0 ]; then
+    finalize 1 "error in strace parameter"
+  fi
 
   p_info "analysing ${COMMAND[@]} using strace and $SECONDSSIM seconds ($MODE)"
 
@@ -538,7 +596,7 @@ function _strace_exec() {
   # Now we'll inspect the files that the execution has used
   local EXEC_FUNCTIONS="exec.*"
   local STRINGS
-  local L BN
+  local L BN DN
 
   # Add all the folders and files that are used, but analyze libraries or executable files
   #FUNCTIONS="open|mkdir"
@@ -557,6 +615,8 @@ function _strace_exec() {
   # Add all the folders and files that checked to exist (folders are not copied, just may
   # appear in the resulting filesystem, but libraries are analyzed)
   # FUNCTIONS="stat|lstat"
+
+  push_logger "PLAIN"
   STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
     if [ "$L" != "" -a "$L" != "/" -a "$L" != "." -a "$L" != ".." ]; then
@@ -572,9 +632,11 @@ function _strace_exec() {
       fi
     fi
   done <<< "$(analyze_strace_strings "$STRINGS")"
+  pop_logger
 
   # If the mode is slim, we'll also copy the whole opened (or created) folders
-  if [ "$MODE" == "slim" ]; then
+  if [ "$MODE" == "slim" -o "$MODE" == "regular" -o "$MODE" == "loose" ]; then
+    push_logger "OPENDIRS"
     local FUNCTIONS="open|mkdir"
     STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
     while read L; do
@@ -584,26 +646,47 @@ function _strace_exec() {
         fi
       fi
     done <<< "$(analyze_strace_strings "$STRINGS")"
+    pop_logger
   fi
 
-  # If the mode is not skinny, we'll copy the whole folders used
-  if [ "$MODE" == "loose" ]; then
+  # If the mode is regular, we'll copy the whole folders used
+  if [ "$MODE" == "regular" -o "$MODE" == "loose" ]; then
+    push_logger "COPYDIRS"
     STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
     while read L; do
       if [ "$L" != "" ]; then
         if [ -d "$L" ]; then
-          copy "$L" -r
+          _strace_copy_folder "$L"
+          # copy "$L" -r
         fi
       fi
     done <<< "$(analyze_strace_strings "$STRINGS")"
+    pop_logger
+  fi
+
+
+  # If the mode is slim, we'll also copy the whole opened (or created) folders
+  if [ "$MODE" == "loose" ]; then
+    push_logger "DIRSFROMFILES"
+    local FUNCTIONS="open"
+    STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
+    while read L; do
+      if [ "$L" != "" ]; then
+        _strace_copy_folder "$L"
+      fi
+    done <<< "$(analyze_strace_strings "$STRINGS")"
+    pop_logger
   fi
 
   # Add all the executables that have been executed (they are analyzed).
   # FUNCTIONS="exec.*"
+
+  push_logger "EXEC"  
   STRINGS="$(cat "$TMPFILE" | grep -E "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
     [ "$L" != "" ] && add_command "$L"
   done <<< "$(analyze_strace_strings "$STRINGS")"
+  pop_logger
 
   rm "$TMPFILE"
 
@@ -660,6 +743,8 @@ function STRACE_command() {
   local CMDLINE=()
   local COMMAND
 
+  push_logger "STRACE"
+
   arrayze_cmd CMDLINE "$1"
   local _PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED}"
 
@@ -679,6 +764,7 @@ function STRACE_command() {
     COMMAND="$(which -- $S_PATH)"
     if [ "$COMMAND" == "" ]; then
       p_debug "cannot analize $S_PATH using strace"
+      pop_logger
       return 0
     fi
     CMDLINE[0]="$COMMAND"
@@ -687,6 +773,8 @@ function STRACE_command() {
   _strace_exec
 
   PLUGINS_ACTIVATED="${_PLUGINS_ACTIVATED}"
+
+  pop_logger
 }
 
 function PLUGIN_11_scripts() {
@@ -1043,6 +1131,7 @@ done
 
 # Exclude the common non-wanted folder (if not prevented)
 if [ "$NOEXCLUDECOMMON" != "true" ]; then
+  EXCLUDED_PATHS+=("/sys")
   EXCLUDED_PATHS+=("/tmp")
   EXCLUDED_PATHS+=("/dev")
   EXCLUDED_PATHS+=("/proc")
@@ -1122,8 +1211,7 @@ while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do
       set_logger "${_C_PLUGIN^^}"
       if ! $p "$CURRENT_CMD"; then
         break
-      fi 
-      set_logger
+      fi
     fi
   done
   set_logger

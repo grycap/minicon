@@ -40,6 +40,7 @@ $0 <options>
                             the image will be loaded into docker.
   --keeptemporary | -k      Keeps the temporary folder. Otherwise, the folder is removed (if it is
                             created by mergecon).
+  --version | -V            Shows the version number and finalizes.
   --verbose | -v            Shows more information about the procedure.
   --debug                   Shows a lot more information about the procedure.
   --help | -h               Shows this help and exits.
@@ -49,6 +50,7 @@ EOF
 source lib/debug.bash
 source lib/temp.bash
 source lib/dockerutils.bash
+source version
 
 function verify_dependencies() {
   if ! docker --version > /dev/null 2> /dev/null; then
@@ -138,6 +140,7 @@ while [ $n -lt ${#ARR[@]} ]; do
         --list|-l)              LISTLAYERS=true;;
         --verbose|-v)           VERBOSE=true;;
         --debug)                DEBUG=true;;
+        --version | -V)         echo "$VERSION" && finalize;;
         --help | -h)            usage && finalize;;
         --keeptemporary|-k)     KEEPTEMPORARY="true";;
         *)                      usage && finalize 1;;

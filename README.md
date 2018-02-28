@@ -59,6 +59,8 @@ $ yum install epel-release
 $ yum install ./minicon-1.2-1.noarch.rpm
 ```
 
+[![asciicast](https://asciinema.org/a/166107.png)](https://asciinema.org/a/166107)
+
 ### 2.2 From sources
 
 **minidock** is a bash script that runs the other applications in the _minicon_ package, to analyze the docker containers. So you just simply need to have a working linux with bash and the other dependencies installed and get the code:
@@ -143,7 +145,7 @@ $ docker build . -t minicon:ex1fat
 Once that we have the image, we will minimize it by issuing the next command:
 
 ```bash
-$ minicon -i minicon:ex1fat -t minicon:ex1 -E bash -E 'ssh localhost' \
+$ minidock -i minicon:ex1fat -t minicon:ex1 --apt -E bash -E 'ssh localhost' \
 -E ip -E id -E cat -E ls -E mkdir \
 -E 'ping -c 1 www.google.es' -- wget www.google.es
 ```
@@ -171,7 +173,58 @@ The whole procedure can be seen in the next asciicast:
 
 [![asciicast](https://asciinema.org/a/165798.png)](https://asciinema.org/a/165798)
 
-### 4.2 NodeJS application
+### 4.2 Basic CentOS 7 in about 16 Mb.
+
+In this example we will create the same use-case than in the previous one, but based on a CentOS image: a basic CentOS-based user interface, that include commands like `wget`, `ssh`, `cat`, etc.
+
+The `centos:latest` image do not contain the needed commands. So we need to create a Docker file that installs `wget`, `ssh`, `ping` and others. We will use this Dockerfile:
+
+```dockerfile
+FROM centos:latest
+RUN yum -y update && yum install -y iproute iputils openssh-clients wget
+```
+
+And now, we will build the image by issuing the next command:
+
+```bash
+$ docker build . -t minicon:ex1fat
+```
+
+> At this point you can check the image, and the commands that it has. You just need to create a container and issue the commands that you want to check: `docker run --rm -it minicon:ex1fat bash`
+
+Once that we have the image, we will minimize it by issuing the next command:
+
+```bash
+$ minidock -i minicon:ex1fat -t minicon:ex1 --yum -E bash -E 'ssh localhost' \
+-E ip -E id -E cat -E ls -E mkdir \
+-E 'ping -c 1 www.google.es' -- wget www.google.es
+```
+
+* Each `-E` flag includes an example of the execution that we want to be able to make in the minimized image.
+* The `--yum` flag is included because we want to minimize a yum-based image (that instructs **minidock** to resolve the dependencies inside the container used for simulation, using yum commands)
+* The command after `--` is one of the command lines that we should be able to execute in the resulting image.
+
+Finally you can verify that the image has drammatically reduced its size:
+
+```bash
+$ docker images
+REPOSITORY          TAG                 IMAGE ID            CREATED              SIZE
+minicon             ex1                 43d11b4837dd        About a minute ago   16MB
+minicon             ex1fat              66c5aa5bb77b        3 minutes ago        362MB
+centos              latest              ff426288ea90        7 weeks ago          207MB
+```
+
+At this point you should be able to run one container, using the resulting image:
+
+```dockerfile
+$ docker run --rm -it minicon:ex1 bash
+```
+
+The whole procedure can be seen in the next asciicast:
+
+[![asciicast](https://asciinema.org/a/166112.png)](https://asciinema.org/a/166112)
+
+### 4.3 NodeJS application
 
 In this example, we will start from the default NodeJS image and will pack our freshly created application.
 
@@ -235,7 +288,7 @@ The whole procedure can be seen in the next asciicast:
 [![asciicast](https://asciinema.org/a/166058.png)](https://asciinema.org/a/166058)
 
 
-### 4.3 Apache server
+### 4.4 Apache server
 
 In order to have an apache server, according to the Docker docs, you can create the following Dockerfile:
 
@@ -296,7 +349,7 @@ minicon             uc5                 f577e1f6e3f8        About a minute ago  
 minicon             uc5fat              ff6f2573d73b        9 days ago           261MB
 ```
 
-### 4.4 cowsay: Docker image with Entrypoint with parameters
+### 4.5 cowsay: Docker image with Entrypoint with parameters
 
 In order to have a simple cowsay application you can create the following Dockerfile:
 

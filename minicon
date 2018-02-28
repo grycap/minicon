@@ -1187,6 +1187,7 @@ verify_dependencies
 
 p_debug "creating $ROOTFS"
 mkdir -p "$ROOTFS"
+mkdir -p "$ROOTFS/tmp"
 
 p_info "copying forced paths"
 

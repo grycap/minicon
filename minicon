@@ -991,14 +991,13 @@ function copy() {
 
   local ALREADY_INCLUDED=false
 
-  for ((n=0;n<${#INCLUDED_PATHS[@]};n++)); do
-    EP="${INCLUDED_PATHS[$n]}"
-    if [[ "$SRC" =~ ^$EP ]]; then
-      p_info "including ${SRC} because it matches pattern ${EP}"
-      ALREADY_INCLUDED=true
-      break
-    fi
-  done
+  #for ((n=0;n<${#INCLUDED_PATHS[@]};n++)); do
+  #  EP="${INCLUDED_PATHS[$n]}"
+  #  if [[ "$SRC" =~ ^$EP ]]; then
+  #    ALREADY_INCLUDED=true
+  #    break
+  #  fi
+  #done
 
   if [ "$ALREADY_INCLUDED" == "false" ]; then
     for ((n=0;n<${#EXCLUDED_PATHS[@]};n++)); do
@@ -1192,7 +1191,7 @@ mkdir -p "$ROOTFS"
 p_info "copying forced paths"
 
 for ((n=0;n<${#INCLUDED_PATHS[@]};n=n+1)); do
-  copy "${INCLUDED_PATHS[$n]}"
+  copy "${INCLUDED_PATHS[$n]}" -r
 done
 
 if is_plugin_active "strace"; then

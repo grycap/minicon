@@ -15,6 +15,26 @@ Using **mergecon**, you will be able to overlay the files of your container imag
 
 ## 2. Installation
 
+### 2.1 From packages
+
+You can get the proper package (.deb o .rpm) from the [Releases page](https://github.com/grycap/minicon/releases) and install it using the appropriate package manager.
+
+**Ubuntu/Debian**
+
+```bash
+$ apt update
+$ apt install ./minicon-1.2-1.deb
+```
+
+**CentOS/Fedora/RedHat**
+
+```bash
+$ yum install epel-release
+$ yum install ./minicon-1.2-1.noarch.rpm
+```
+
+### 2.2 From sources
+
 **mergecon** is a bash script that deals with **docker** commands. **mergecon** is part of the **minicon** package, and so you just simply need to have a working linux with bash installed and get the code:
 
 ```bash
@@ -27,7 +47,7 @@ In that folder you'll have the **mergecon** application. I would suggest to put 
 $ mv minicon /opt
 ```
 
-### 2.1 Dependencies
+#### 2.2.1 Dependencies
 
 **mergecon** depends on the commands _tar_ and _jq_. So, you need to install the proper packages in your system. 
 

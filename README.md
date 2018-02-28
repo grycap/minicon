@@ -39,7 +39,29 @@ To obtain the minimized Docker image, and hiding the internal procedure.
 
 ## 2. Installation
 
-**minidock** is a bash script that runs the other applications in the _minicon_ package, to analyze the docker containers. So you just simply need to have a working linux with bash installed and get the code:
+### 2.1 From packages
+
+You can get the proper package (.deb o .rpm) from the [Releases page](https://github.com/grycap/minicon/releases) and install it using the appropriate package manager.
+
+**Ubuntu/Debian**
+
+```bash
+$ apt update
+$ apt install ./minicon-1.2-1.deb
+```
+
+[![asciicast](https://asciinema.org/a/165792.png)](https://asciinema.org/a/165792)
+
+**CentOS/Fedora/RedHat**
+
+```bash
+$ yum install epel-release
+$ yum install ./minicon-1.2-1.noarch.rpm
+```
+
+### 2.2 From sources
+
+**minidock** is a bash script that runs the other applications in the _minicon_ package, to analyze the docker containers. So you just simply need to have a working linux with bash and the other dependencies installed and get the code:
 
 ```bash
 $ git clone https://github.com/grycap/minicon
@@ -52,7 +74,7 @@ $ mv minicon /opt
 $ export PATH=$PATH:/opt/minicon
 ```
 
-### 2.1 Dependencies
+#### 2.2.1 Dependencies
 
 **minidock** depends on the commands _minicon_, _importcon_ and _mergecon_, and the packages _jq_, _tar_ and _docker_. So, you need to install the proper packages in your system.
 
@@ -99,9 +121,121 @@ Some of the options are:
 
 ## 4. Examples
 
-### 4.1 Basic UI
+### 4.1 Basic Ubuntu UI in less than 11 Mb.
 
-### 4.1 Apache server
+In this example we will create a basic user interface, from ubuntu, that include commands like `wget`, `ssh`, `cat`, etc.
+
+The `ubuntu:latest` image do not contain such commands. So we need to create a Docker file that installs `wget`, `ssh`, `ping` and others. We will use this Dockerfile:
+
+```dockerfile
+FROM ubuntu:latest
+RUN apt-get update && apt-get install -y ssh iproute2 iputils-ping wget
+```
+
+And now, we will build the image by issuing the next command:
+
+```bash
+$ docker build . -t minicon:ex1fat
+```
+
+> At this point you can check the image, and the commands that it has. You just need to create a container and issue the commands that you want to check: `docker run --rm -it minicon:ex1fat bash`
+
+Once that we have the image, we will minimize it by issuing the next command:
+
+```bash
+$ minicon -i minicon:ex1fat -t minicon:ex1 -E bash -E 'ssh localhost' \
+-E ip -E id -E cat -E ls -E mkdir \
+-E 'ping -c 1 www.google.es' -- wget www.google.es
+```
+
+* Each `-E` flag includes an example of the execution that we want to be able to make in the minimized image.
+* The `--apt` flag is included because we want to minimize an apt-based image (that instructs **minidock** to resolve the dependencies inside the container, using apt commands)
+* The command after `--` is one of the command lines that we should be able to execute in the resulting image.
+
+Finally you can verify that the image has drammatically reduced its size:
+
+```bash
+$ docker images minicon
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+minicon             ex1                 42a532b9c262        28 minutes ago      10.9MB
+minicon             ex1fat              d3498d9cf260        30 minutes ago      211MB
+```
+
+At this point you should be able to run one container, using the resulting image:
+
+```dockerfile
+$ docker run --rm -it minicon:ex1 bash
+```
+
+The whole procedure can be seen in the next asciicast:
+
+[![asciicast](https://asciinema.org/a/165798.png)](https://asciinema.org/a/165798)
+
+### 4.2 NodeJS application
+
+In this example, we will start from the default NodeJS image and will pack our freshly created application.
+
+In first place we are creating an application using express (for our purposes, we are using the default application):
+
+```bash
+$ express myapp
+```
+
+To dockerize this nodejs application, you can use the default [node image at docker hub](https://hub.docker.com/_/node/), which is based on Debian, and use the next Dockerfile:
+
+```dockerfile
+FROM node
+COPY myapp /usr/app/myapp
+WORKDIR /usr/app/myapp
+RUN npm install
+ENTRYPOINT node ./bin/www
+EXPOSE 3000
+```
+
+Now we can build our application and test it:
+
+```bash
+$ docker build . -t minicon:ex2fat
+$ docker run --rm -id -p 10000:3000 minicon:ex2fat
+5cb83644120c074f799e2ba802f09690054eae48fdb44d92094550de4f895702                                                                                    $ wget -q -O- http://localhost:10000
+<!DOCTYPE html><html><head><title>Express</title><link rel="stylesheet" href="/stylesheets/style.css"></head><body><h1>Express</h1><p>Welcome to Express</p></body></html>
+```
+
+Once that we have our application, we can minimize it:
+
+```bash
+$ minidock --apt -i minicon:ex2fat -t minicon:ex2 -I /usr/app/myapp
+```
+
+* The `--apt` flag is included because the original image is based on debian (that instructs **minidock** to resolve the dependencies inside the container, using apt commands)
+* We do not need to include any command to simulate because the original image has an entrypoint defined, which will be simulated.
+* In this example we are not running all the possibilities of our application during the simulation, but we know that the application is stored in `/usr/app/myapp` and that the global modules 
+
+We can test the image:
+
+```bash
+$ docker run --rm -id -p 10001:3000 minicon:ex2 
+fedb5c972e8e47ac02c09661f767156aa88328b1ce72646e717bd60624adefda     
+$ wget -q -O- http://localhost:10001
+<!DOCTYPE html><html><head><title>Express</title><link rel="stylesheet" href="/stylesheets/style.css"></head><body><h1>Express</h1><p>Welcome to Express</p></body></html>calfonso@ubuntu:~/ex2$                  
+```
+
+If we check the size of the original and the minimized images, we can see that it has been reduced from 686 MB. to 45.6MB. (which is even less than the official node:alpine image).
+```bash
+$ docker images                                                      
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+minicon             ex2                 1080e761a83c        38 seconds ago      45.6MB                                             
+minicon             ex2fat              7f8bef02d321        4 minutes ago       686MB
+node                alpine              a88ff852e3d4        4 days ago          68MB
+node                latest              29831ba76d93        4 days ago          676MB
+```
+
+The whole procedure can be seen in the next asciicast:
+
+[![asciicast](https://asciinema.org/a/166058.png)](https://asciinema.org/a/166058)
+
+
+### 4.3 Apache server
 
 In order to have an apache server, according to the Docker docs, you can create the following Dockerfile:
 
@@ -162,7 +296,7 @@ minicon             uc5                 f577e1f6e3f8        About a minute ago  
 minicon             uc5fat              ff6f2573d73b        9 days ago           261MB
 ```
 
-### 4.2 cowsay: Docker image with Entrypoint with parameters
+### 4.4 cowsay: Docker image with Entrypoint with parameters
 
 In order to have a simple cowsay application you can create the following Dockerfile:
 

@@ -1,5 +1,5 @@
-%define version %(cat ../../src/version | awk -F'-' '{print $1}')
-%define revision %(cat ../../src/version | awk -F'-' '{print $2}')
+%define version %(cat ../../src/version | awk -F'=' '{print $2}' | awk -F'-' '{print $1}')
+%define revision %(cat ../../src/version | awk -F'=' '{print $2}' | awk -F'-' '{print $2}')
 
 Summary:        MiniCon - Minimization of Container Filesystems
 License:        Apache 2.0

@@ -23,6 +23,26 @@ In this sense, the recent publication of the NIST "[Application Container Securi
 
 ## 2. Installation
 
+### 2.1 From packages
+
+You can get the proper package (.deb o .rpm) from the [Releases page](https://github.com/grycap/minicon/releases) and install it using the appropriate package manager.
+
+**Ubuntu/Debian**
+
+```bash
+$ apt update
+$ apt install ./minicon-1.2-1.deb
+```
+
+**CentOS/Fedora/RedHat**
+
+```bash
+$ yum install epel-release
+$ yum install ./minicon-1.2-1.noarch.rpm
+```
+
+### 2.2 From sources
+
 **minicon** is a bash script that tries to analize an application (or a set of applications) using other tools such as _ldd_ or _strace_. So you just simply need to have a working linux with bash installed and get the code:
 
 ```bash
@@ -35,7 +55,7 @@ In that folder you'll have the **minicon** application. I would suggest to put i
 $ mv minicon /opt
 ```
 
-### 2.1 Dependencies
+### 2.2.1 Dependencies
 
 **minicon** depends on the commands _ldd_, _file_, _strace_, _rsync_ and _tar_. So, you need to install the proper packages in your system.
 

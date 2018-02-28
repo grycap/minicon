@@ -34,6 +34,10 @@ fi
 REVISION=${VERSION##*-}
 VERSION=${VERSION%%-*}
 
+if [ "$REVISION" == "$VERSION" ]; then
+  REVISION=
+fi
+
 if [ "$REVISION" != "" ]; then
   REVISION="-${REVISION}"
 fi

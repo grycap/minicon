@@ -276,6 +276,12 @@ function extract_image() {
   if [ "$IMAGENAME" != "" ]; then
     mkdir -p "$FOLDER"
     local T="$(tempfile '.')"
+    if ! docker inspect "$IMAGENAME" 2> /dev/null; then
+      p_debug "retrieving image $IMAGENAME because it is not in the registry"
+      if ! docker pull "$IMAGENAME" 2> /dev/null; then
+        finalize 1 "image $IMAGENAME could not be retrieved"
+      fi
+    fi
     if ! docker save "$IMAGENAME" -o "$T" 2> /dev/null; then
       finalize 1 "could not retrieve image $IMAGENAME"
     fi

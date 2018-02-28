@@ -32,6 +32,11 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 REVISION=${VERSION##*-}
+
+if [ "$REVISION" == "$VERSION" ]; then
+  REVISION=
+fi
+
 if [ "$REVISION" != "" ]; then
   REVISION="-${REVISION}"
 fi

@@ -1,0 +1,118 @@
+.\" Manpage for minidock.
+.\" Contact caralla@upv.es to correct errors or typos.
+.TH man 1 "01 Mar 2018" "1.2-1" "minidock man page"
+.SH NAME
+minidock - minimization of Docker containers
+.SH SYNOPSIS
+minidock <options> <options for minicon> [ --docker-opts <options for docker> ] -- <run for the container>
+
+.SH DESCRIPTION
+When you run Docker containers, you usually run a system that has a whole Operating System and your specific application. The result is that the footprint of the container is bigger than needed.
+
+.B minidock
+aims at reducing the footprint of the Docker containers, by just including in the container those files that are needed. That means that the other files in the original container are removed.
+
+.B minidock
+is based on [**minicon**](doc/minicon.md), [**importcon**](doc/importcon.md) and [**mergecon**](doc/mergecon.doc), and hides the complexity of creating a container, mapping minicon, guessing parameters such as the entrypoint or the default command, creating the proper commandline, etc.
+
+.SH WHY MINIDOCK?
+
+Reducing the footprint of one container is of special interest, to redistribute the container images and saving the storage space in your premises. There are also security reasons to minimize the unneeded application or environment available in one container image (e.g. if the container does not need a compiler, why should it be there? maybe it would enable to compile a rootkit). 
+
+.B minicon
+is a tool that enables a fine grain minimization for any type of filesystem, but it is possible to use it to reduce Docker images following the next pipeline:
+
+ - Preparing a Docker container with the dependencies of **minicon**
+ - Guessing the entrypoint and the default command for the container.
+ - Running **minicon** for these commands (maping the proper folders to get the resulting tar file).
+ - Using **importcon** to import the resulting file to copy the entrypoint and other settings.
+ - etc.
+
+.B minidock
+is a one-liner that automates that procedure to make that reducing a container consist in just to convert a
+
+.IP
+.B $ docker run --rm -it myimage myapp
+.RE
+
+into
+
+.IP
+.B $ minicon -i myimage -t myimage:minicon -- myapp
+.RE
+
+.SH OPTIONS
+
+.B <run for the container>   
+  Is the whole commandline to be analised in the run. These are the same parameters that you would pass to "docker run ... <image> <run for the container>".  If no run is provided, minidock will use the default command. And if the image as no default command, it will try to use one of the -R or -E commands.
+  
+.B <options for docker>
+  If you need them, you can include some options that will be raw-passed to the docker run command used during the analysis. (i.e. minidock will execute docker run <options generated> <options for docker> ...).
+
+.B <options for minicon>
+  If you need to, you can add some minicon-specific options. The supported options are --include --exclude --plugin
+
+.B --image | -i <image>
+  Name of the existing image to minimize
+
+.B --tag | -t <tag>
+  Tag for the resulting image (random if not provided)
+
+.B --default-cmd | -d
+  Analyze the default command for the containers in the original image
+
+.B --apt
+  Install the dependencies from minicon using apt-get commands (in the container used for the simulation).
+  
+.B --yum
+  Install the dependencies from minicon using yum commands (in the container used for the simulation).
+
+.B --execution | -E <full commandline execution>
+  Commandline to analyze when minimizing the container (i.e. that commandline should be able to be executed in the resulting container so the files, libraries, etc. needed should be included). The difference with -R parameter is that in this case, the Entrypoint is not prepended to the commandline (docker exec vs docker run).
+
+.B --run | -R <full commandline run>
+  Command to analyze when minimizing the container (i.e. that command should be able to be run in the resulting container so the files, libraries, etc. needed should be included). The difference with -E parameter is that in this case, the Entrypoint is prepended to the commandline (docker exec vs docker run).
+
+.B -2 <image>
+  If needed, you can merge the resulting minimized image with other. This is very specific for the "mergecon" tool. It is useful for (e.g.) adding a minimal Alpine distro (with ash and so on) to the minimized filesystem.
+
+.B --version | -V
+  Shows the version number and finalizes.
+
+.B --verbose | -v
+  Shows more information about the procedure.
+
+.B --debug
+  Shows a lot more information about the procedure.
+
+.B --help | -h
+  Shows the help and exits.
+
+.SH PLUGINS
+
+Refer to the documentation of minicon(1) to see how to configure the different plugins from minicon. It is of special interest the 
+.B strace
+plugin, to increase the time that an execution is being simulated.
+
+.SH EXAMPLES
+
+Starting from a Docker image that has the commands available, fetting a minimal filesyste that includes bash, mkdir, ls, ping, ssh, etc. commands
+
+.RS 3
+.B $ minidock -i minicon:uifat -t minicon:ui --apt -E bash -E 'ssh localhost' \
+-E ip -E id -E cat -E ls -E mkdir \
+-E 'ping -c 1 www.google.es' -- wget -q -O- www.google.es
+.RE
+
+Starting from the Docker image mynodeapp that runs a NodeJS application, which is in /usr/app/myapp
+
+.RS 3
+.B $ minidock --apt -i mynodeapp -t mynodeapp:skinny -I /usr/app/myapp
+.RE
+
+
+.SH SEE ALSO
+minicon(1)
+
+.SH AUTHOR
+Carlos de Alfonso (caralla@upv.es)

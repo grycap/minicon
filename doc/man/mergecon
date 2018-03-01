@@ -1,0 +1,54 @@
+.\" Manpage for mergecon.
+.\" Contact caralla@upv.es to correct errors or typos.
+.TH man 1 "01 Mar 2018" "1.2-1" "mergecon man page"
+.SH NAME
+mergecon - merge Docker containers
+.SH SYNOPSIS
+mergecon <options>
+
+.SH DESCRIPTION
+Docker containers are built from different layers, and 
+.B mergecon
+is a tool that merges the filesystems of two different container images. It creates a new container image that is built from the combination of the layers of the filesystems of the input containers.
+
+.SH WHY MERGECON?
+
+If you create a minimal application filesystem (i.e. using minicon), you will be able to run your application, but you will not have any other application available for (e.g.) debugging your application.
+
+Using mergecon, you will be able to overlay the files of your container image to other existing container image. In this way, you can overlay your minicon resulting application over a whole ubuntu:latest container. The effect is that you will have the support of a whole operating environment over the minimal container.
+
+On the other side, if you have an application that needs to be compiled and installed, you can create a one-liner installation, and combine that layer with other container. That means that you will be able to compile such image in (e.g.) ubuntu, and create a final container with other flavor (e.g. CentOS).
+
+.SH OPTIONS
+.B --first | -1 <image>
+ Name of the first container image (will use docker save to dump it)
+
+.B --second | -2 <image>
+ Name of the second container image (will use docker save to dump it) the default behaviour gives more priority to the second image. I.e. in case of overlapping files in both input images, the files in the second image will be exposed to the final image.
+
+.B --tag | -t <name>
+ Name of the resulting container image. If not provided, the resulting name will be the concatenation of the names of the two input images: <image1>:<image2> (the : in the input image names is removed).
+
+.B --working | -w <folder>
+ Working folder. If not provided will create a temporary folder in /tmp
+
+.B --list | -l
+ Lists the layers in the images (useful for filesystem composition).
+
+.B --file | -f <file>
+ tar file where the resulting image will be created. If not provided, the image will be loaded into docker.
+
+.B --keeptemporary | -k
+ Keeps the temporary folder. Otherwise, the folder is removed (if it is created by mergecon).
+
+.B --verbose | -v
+ Gives more information about the procedure.
+
+.B --debug
+ Gives a lot more information about the procedure.
+
+.SH SEE ALSO
+minicon(1)
+
+.SH AUTHOR
+Carlos de Alfonso (caralla@upv.es)

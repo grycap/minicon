@@ -1,6 +1,6 @@
 # minicon - MINImization of the filesystems for CONtainers
 
-When you run containers (e.g. in Docker), you usually run a system that has a whole Operating System and your specific application. The result is that the footprint of the container is bigger than needed.
+When you run containers (e.g. in Docker), you usually run a system that has a whole Operating System, documentation, extra packages, and your specific application. The result is that the footprint of the container is bigger than needed.
 
 **minicon** aims at reducing the footprint of the filesystem for the container, just adding those files that are needed. That means that the other files in the original container are removed.
 
@@ -11,7 +11,7 @@ The purpose of **minicon** is better understood with the use cases explained in 
 1. **Node.JS+Express application ([direct link](#use-case-nodejsexpress-application))**: The size of the defaut NodeJS Docker image (i.e. node:latest), ready to run an application is about from 691MB. Applying **minicon** to that container, the size is reduced to about 45.3MB.
 1. **Use case: FFMPEG ([direct link](#use-case-ffmpeg))**: The size of a common _Ubuntu+FFMPEG_ image is about 388Mb., but if you apply **minicon** on that image, you will get a working _ffmpeg_ container whose size is only about 119Mb.
 
-## 1. Why **minidock**?
+## 1. Why **minicon**?
 
 Reducing the footprint of one container is of special interest, to redistribute the container images.
 
@@ -139,7 +139,7 @@ You can add as many ```--plugin``` entries as needed, in the call to **minicon**
 #### strace plug-in
 This plugin executes the applications for a while and tries to guess which files is executing or using. Then these files are included in **minicon** in order to be also included analyzed for inclusion in the resulting filesystem.
 
-> In the case that you want to use **minicon** to analyze applications in a Docker container using the _strace_ plugin, is mandatory to run it as privileged (--privileged). Otherwise it will fail. It should not suppose any additional security problem, because it is a run-once analysis, and the resulting files will not require that the container is privileged (at least, because of **minicon**).
+> In the case that you want to use **minicon** to analyze applications in a Docker container using the _strace_ plugin, is mandatory to run it adding the `--cap-add SYS_PTRACE` option. Otherwise it will fail.
 
 The execution of an application without any parameter may not represent the usage of the application. This is why you can use the parameter ```-E``` to include commandlines that would represent the usage of the application. These commandlines should contain information about executions that makes use of all the functions that you want to use from the application in the resulting filesystem.
 

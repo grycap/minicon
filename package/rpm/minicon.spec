@@ -25,18 +25,25 @@ BuildArch:      noarch
 
 %install
 mkdir -p $RPM_BUILD_ROOT/bin/
-install -m 0755 bin/minicon $RPM_BUILD_ROOT/bin
-install -m 0755 bin/minidock $RPM_BUILD_ROOT/bin
-install -m 0755 bin/importcon $RPM_BUILD_ROOT/bin
-install -m 0755 bin/mergecon $RPM_BUILD_ROOT/bin
+mkdir -p $RPM_BUILD_ROOT/usr/share/man/man1
+install -m 0755 bin/* $RPM_BUILD_ROOT/bin
+install -m 0644 usr/share/man/man1/* $RPM_BUILD_ROOT/%{_mandir}/man1
+
+%clean
+rm -rf $RPM_BUILD_ROOT
 
 %post
 
 %postun
 
 %files
-%defattr(-,root,root,700)
+%defattr(-,root,root,755)
 /bin/minicon
 /bin/minidock
 /bin/importcon
 /bin/mergecon
+%defattr(-,root,root,644)
+%{_mandir}/man1/minicon.1.gz
+%{_mandir}/man1/minidock.1.gz
+%{_mandir}/man1/importcon.1.gz
+%{_mandir}/man1/mergecon.1.gz

@@ -1,0 +1,128 @@
+.\" Manpage for importcon.
+.\" Contact caralla@upv.es to correct errors or typos.
+.TH man 1 "01 Mar 2018" "1.2-1" "importcon man page"
+.SH NAME
+importcon - IMPORT CONtainer copying features
+.SH SYNOPSIS
+importcon <options> <container filesystem in tar file> 
+.SH DESCRIPTION
+When a container is running, it is possible to export its filesystem to a tar file, using the command 
+.I docker export <mycontainer>. 
+Later, it is possible to import that filesystem into Docker to be used as a Docker image, using a command like 
+.I docker import <mytarfile>. 
+The problem is that the new container has lost all the parameters from the original image (i.e. ENTRYPOINT, USER, CMD, etc.).
+
+.B importcon
+is a script that enables to import a filesystem exported using 
+.I docker export
+into Docker, and to copy the parameters from the original image (i.e. ENTRYPOINT, USER, CMD, VOLUME, etc.)
+
+
+.SH OPTIONS
+.B --image | -i <image>
+  Name of the existing image to copy the parameters.
+
+.B --tag | -t <tag>
+  Tag for the image that will be created from the tarfile (random if not provided)
+
+.B --env | -E
+  Copy ENV settings
+
+.B --entrypoint | -e
+  Copy ENTRYPOINT settings
+
+.B --expose | -x
+  Copy EXPOSE settings
+
+.B --onbuild | -o
+  Copy ONBUILD settings
+
+.B --user | -u
+  Copy USER settings
+
+.B --volume | -V
+  Copy VOLUME settings
+
+.B --workdir | -w
+  Copy WORKDIR settins
+
+.B --cmd | -c
+  Copy CMD settings
+
+.B --all | -A
+  Copy all the previous settings: ENV, ENTRYPOINT, EXPOSE, ONBUILD, USER, VOLUME, WORKDIR and CMD.
+
+.B --version
+  Displays the version of the package and exits.
+
+.B --help | -h
+  Shows this help and exits.
+
+.SH EXAMPLES
+
+If we take the next Dockerfile
+
+  FROM ubuntu
+  RUN apt-get update && apt-get install -y --force-yes apache2
+  EXPOSE 80 443
+  VOLUME ["/var/www", "/var/log/apache2", "/etc/apache2"]
+  ENTRYPOINT ["/usr/sbin/apache2ctl", "-D", "FOREGROUND"]
+
+we can build an image using the command
+
+.I docker build . -t tests:apache
+
+Then we can run a container
+
+.I docker run --rm -id -p 10000:80 tests:apache
+
+And export its filesystem to a file:
+
+.I docker export hungry_payne -o myapache.tar
+
+If we simply import the file back to a Docker image
+
+.I docker import myapache.tar tests:myapache
+
+we can check the differences between the configuration of each image for the new containers:
+
+.I docker inspect tests:apache | jq '.[0].Config'
+  {
+  ...
+    "Entrypoint": [
+      "/usr/sbin/apache2ctl",
+      "-D",
+      "FOREGROUND"
+    ],
+  ...
+  }
+
+.I docker inspect tests:myapache | jq '.[0].Config'
+  {
+  ...
+    "Entrypoint": null,
+  ...
+  }
+
+
+We can see that our new image has all the setting set to empty. We can use 
+.B importcon
+to import the container, taking the original image as reference:
+
+.I importcon -t tests:apacheimportcon -i tests:apache myapache.tar -A
+.I docker inspect tests:apacheimportcon | jq '.[0].Config'
+  {
+  ...
+    "Entrypoint": [
+      "/usr/sbin/apache2ctl",
+      "-D",
+      "FOREGROUND"
+    ],
+  ...
+  }
+
+.SH SEE ALSO
+minicon(1), minidock(1), jq(1)
+
+.SH AUTHOR
+Carlos de Alfonso (caralla@upv.es)

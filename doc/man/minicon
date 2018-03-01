@@ -1,0 +1,150 @@
+.\" Manpage for minicon.
+.\" Contact caralla@upv.es to correct errors or typos.
+.TH man 1 "01 Mar 2018" "1.2-1" "minicon man page"
+.SH NAME
+minicon - MINImization of COntainers
+.SH SYNOPSIS
+minicon <options> -- <main execution to analyze>
+
+minicon is a general tool to analyze applications and executions of these applications to obtain a filesystem that only contains the dependencies that have been detected. It aims at reducing the footprint of the filesystem for the container, just adding those files that are needed. That means that the other files in the original container are removed. In particular, it can be used to reduce Docker containers (see minidock).
+
+.SH DESCRIPTION
+When you run containers (e.g. in Docker), you usually run a system that has a whole Operating System, documentation, extra packages, and your specific application. The result is that the footprint of the container is bigger than needed.
+
+.B minicon
+aims at reducing the footprint of the filesystem for the container, just adding those files that are needed. 
+That means that the other files in the original container are removed.
+
+.B minicon
+is a general tool to analyze applications and executions of these applications to obtain a filesystem 
+that contains all the dependencies that have been detected. In particular, it can be used to reduce Docker
+containers. The
+.B minicon
+package includes
+.B minidock
+which will help to reduce Docker containers by hiding the underlying complexity of running
+.B minicon
+inside a Docker container.
+
+.SH WHY MINICON?
+
+Reducing the footprint of one container is of special interest, to redistribute the container images.
+
+It is of special interest in cases such as [SCAR](https://github.com/grycap/scar), that executes containers out of Docker images in AWS Lambda. In that case, the use cases are limited by the size of the container (the ephemeral storage space is limited to 512 Mb., and SCAR needs to pull the image from Docker Hub into the ephemeral storage and then uncompress it; so the maximum size for the container is even more restricted).
+
+But there are also security reasons to minimize the unneeded application or environment available in one container image. In the case that the application fails, not having other applications reduces the impact of an intrusion (e.g. if the container does not need a compiler, why should it be there? maybe it would enable to compile a rootkit). 
+
+In this sense, the publication of the NIST "Application Container Security Guide" (https://doi.org/10.6028/NIST.SP.800-190) suggests that 
+.I """An image should only include the executables and libraries required by the app itself; all other OS functionality is provided by the OS kernel within the underlying host OS""".
+
+.SH OPTIONS
+.B --rootfs | -r       
+  Create the filesystem in a specific folder.
+
+.B --tar-file | -t     
+  Generate a tar file that contains the resulting filesystem. This is ideal to import it into docker using the command "docker import". If not specified the --rootfs parameter, minicon will use a temporary folder.
+
+.B --exclude | -e <F>  
+  Exclude all paths that begin with 'F' (it accepts texts for regular expressions). The files are excluded from the final filesystem, but if an execution depends on an app in any of these paths, it will be executed anyway (e.g. -E '/tmp/myapp' -e '/tmp' will analyze myapp, but will not appear in the final filesystem).
+
+.B --no-exclude-common | -C
+  The default behavior of minicon is to exclude /tmp, /proc and /dev. If you do not want to exclude them, you should include this flag. The only excluded folders will be those included in the commandline.
+
+.B --include | -I <F>  
+  Force to consider the file (or folder) pointed by 'F'. Take into account that --include has priority over --exclude.
+
+.B --execution | -E <cmdline>
+  Executions to analyze, appart from the main execution (you can include a whole execution with parameters between quotes). It can appear as many time as executions are needed. This is specially useful for the strace plugin. In other case, the effect will be the same of including the command from the execution in the executables to analyze. The executions will be made in order of appearance, AFTER the main execution.
+
+.B --no-ldconfig | -L  
+  Do not generate the /etc/ldconfig.so file, adjusted to the new filesystem.
+
+.B --plugin            
+  Activates some plugins and sets the options for them. The syntax is --plugin=<plugin name>:<parameter>=<value>:<parameter>=<value>... (see section PLUGINS).
+
+.B --plugin-all        
+  Activates all the available plugins, using their default options.
+
+.B --logfile | -g <F>  
+  Outputs the information in file F instead of stdout and stderr
+
+.B --quiet | -q        
+  Makes the tasks silently
+
+.B --version | -V      
+  Shows the version number and finalizes.
+
+.B --verbose | -v      
+  Shows more information about the procedure.
+
+.B --debug             
+  Shows a lot more information about the procedure.
+
+.B --help | -h         
+  Shows this help and exits.
+
+.SH PLUGINS
+
+The current version of 
+.B minicon
+includes the next plugins: link, which, folder, ldd, scripts and strace.
+
+.SS link, which and folder
+These plugins are activated by default and deal with links, getting the proper executable application from the path and copying whole folders.
+
+.SS ldd
+This plugin makes use of the command
+.I ldd
+to check the dependencies of an application or library. The resulting dependencies will be added to the resulting filesystem.
+
+.SS scripts
+This plugins tries to guess if a command is an interpreted script. If it is guessed to be, the interpreter will be also analyzed. It makes use of the command
+.I file
+and the analysis of the shebang line of text files.
+
+.SS strace
+This plugin analyzes the execution of an application and detects which files have been used. It is tightened to the 
+.B -E
+parameter from minicon. It accepts several parameters and the syntax is:
+
+--plugin=strace:param=value:param=value...
+
+.B seconds
+the number of seconds that strace will be analyzing the execution
+
+.B mode
+decides which files will be included in the filesystem. The possible values are: skinny (includes only the opened, checked, etc. files and creates the opened, checked, etc. folders), slim (also includes the whole opened or created folders), regular (also includes the whole folder in which the opened files are stored; useful for included libraries) and loose (also includes the whole opened, checked, etc. folder).
+
+.B execfile
+points to a file that includes commandline examples of different applications. These commandlines will be used for analyzing the executables. E.g. analyzing a plain 
+.I ping
+command has no sense, because it does nothing. But analyzing
+.I ping www.google.es
+makes use of libraries, name resolution, etc.
+
+.SH EXAMPLES
+
+Getting a minimal filesyste that includes bash, mkdir, ls, etc. commands
+
+.RS 3
+.B minicon -t ./minimal.tar --plugin=strace -E bash -E 'ssh localhost' -E 'ip addr' -E id -E cat -E ls -E mkdir -E 'ping -c 1 www.google.es' -- wget -q -O- www.google.es
+.RE
+
+Then it is possible to import such filesystem into Docker with a command like
+
+.RS 3
+.B docker import minimal.tar tests:minicon
+.RE
+
+The same run of minicon, but running it inside a Docker ubuntu-based container:
+
+.RS 3
+.B docker run --privileged --rm -it -v /bin/minicon:/tmp/minicon -v $PWD:/tmp/work ubuntu:latest bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/work/minimal.tar --plugin=strace -E bash -E "ssh localhost" -E "ip addr" -E id -E cat -E ls -E mkdir -E "ping -c 1 www.google.es" -- wget -q -O- www.google.es'
+.RE
+
+
+.SH SEE ALSO
+minidock(1), ldd(1), strace(1), file(1), which(1)
+
+.SH AUTHOR
+Carlos de Alfonso (caralla@upv.es)

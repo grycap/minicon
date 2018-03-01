@@ -23,7 +23,19 @@ SRCFOLDER=$1
 if [ "$SRCFOLDER" == "" ]; then
   SRCFOLDER="."
 fi
-# VERSION=$(cat "$SRCFOLDER/version")
+
+if [ ! -e "$SRCFOLDER/src" ]; then
+  echo "could not find src folder in $SRCFOLDER"
+  exit 1
+fi
+
+MANFOLDER="$SRCFOLDER/doc/man"
+
+if [ ! -d "$MANFOLDER" ]; then
+  MANFOLDER=
+fi
+
+SRCFOLDER="$SRCFOLDER/src"
 
 source "$SRCFOLDER/version"
 
@@ -43,12 +55,21 @@ fi
 VERSION=${VERSION%%-*}
 
 FNAME=./minicon-${VERSION}
+rm -rf "$FNAME"
+
 mkdir -p "${FNAME}/bin"
+mkdir -p "${FNAME}/usr/share/man/man1"
+
 for i in minicon mergecon minidock importcon; do
   $SRCFOLDER/bashflatten -C $SRCFOLDER/$i > "${FNAME}/bin/$i"
+  if [ -e "$MANFOLDER/$i" ]; then
+    cp "$MANFOLDER/$i" "${FNAME}/usr/share/man/man1/${i}.1"
+    gzip "${FNAME}/usr/share/man/man1/${i}.1"
+  fi
 done
 
 chmod 755 ${FNAME}/bin/*
+chmod 644 ${FNAME}/usr/share/man/man1/*
 
 tar czf minicon-${VERSION}.tar.gz $FNAME
 cp minicon-${VERSION}.tar.gz ~/rpmbuild/SOURCES/

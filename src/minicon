@@ -35,7 +35,7 @@ $0 <option> -- <main execution>
   --exclude | -e <F>  Exclude all paths that begin with 'F' (it accepts texts for regular 
                       expressions). The files are excluded from the final filesystem, but if 
                       an execution depends on an app in any of these paths, it will be executed 
-                      anyway (e.g. -E '/tmp/myapp' -e '/tmp' will analyze myapp, but will not be
+                      anyway (e.g. -E '/tmp/myapp' -e '/tmp' will analyze myapp, but will not
                       appear in the final filesystem).
   --no-exclude-common | -C
                       The default behavior of minicon is to exclude /tmp, /proc and /dev. If you
@@ -52,8 +52,6 @@ $0 <option> -- <main execution>
                       to analyze. The executions will be made in order of appearance, AFTER the 
                       main execution.
   --no-ldconfig | -L  Do not generate the /etc/ldconfig.so file, adjusted to the new filesystem. 
-                      It is suggested to always use this flag, to set the proper path to the
-                      libraries included in the new filesystem.
   --ldconfig | -l     (deprecated) generate the /etc/ldconfig.so file, adjusted to the new 
                       filesystem. This is deprecated because now it is the default behavior if 
                       flag -L is not used.

@@ -1,27 +1,21 @@
-# minicon - minimization containers
+# minidock - minimization of Docker containers
 
-When you run containers (e.g. in Docker), you usually run a system that has a whole Operating System, documentation, extra packages, etc. and your specific application. The result is that the footprint of the container is bigger than needed.
+When you run Docker containers, you usually run a system that has a whole Operating System and your specific application. The result is that the footprint of the container is bigger than needed.
 
-**minicon** aims at reducing the footprint of the Docker containers, by just including in the container those files that are needed. That means that the other files in the original container are removed.
+**minidock** aims at reducing the footprint of the Docker containers, by just including in the container those files that are needed. That means that the other files in the original container are removed.
 
-**minicon** is a general tool to analyze applications and executions of these applications to obtain a filesystem that contains all the dependencies that have been detected. In particular, it can be used to reduce Docker containers. The **minicon** package includes **minidock**
-which will help to reduce Docker containers by hiding the underlying complexity of running **minicon** inside a Docker container.
+The purpose of **minidock** is better understood with the use cases explained in depth in the section "[Examples](#4-examples)": the size of an Apache server is reduced from 216MB. to 50.4MB., and the size of a Perl application in a Docker container is reduced from 206MB to 50.4MB.
 
-The purpose of **minicon** and **minidock** is better understood with the use cases explained in depth in the section "[Examples](#4-examples)": the size of a basic UI that contains bash, ip, wget, ssh, etc. commands is _reduced from 211MB to 10.9MB_; the size of a NodeJS application along with the server is _reduced from 686 MB (using the official node image) to 45.6MB_; the size of an Apache server is _reduced from 216MB to 50.4MB_, and the size of a Perl application in a Docker container is _reduced from 206MB to 43.3MB_.
 
-> [**minidock**](doc/minidock.md) is based on [**minicon**](doc/minicon.md), [**importcon**](doc/importcon.md) and [**mergecon**](doc/mergecon.md), and hides the complexity of creating a container, mapping minicon, guessing parameters such as the entrypoint or the default command, creating the proper commandline, etc.
+> **minidock** is based on [**minicon**](minicon.md), [**importcon**](importcon.md) and [**mergecon**](mergecon.md), and hides the complexity of creating a container, mapping minicon, guessing parameters such as the entrypoint or the default command, creating the proper commandline, etc.
 
-## 1. Why **minicon** and **minidock**?
+## 1. Why **minidock**?
 
-Reducing the footprint of one container is of special interest, to redistribute the container images.
+Reducing the footprint of one container is of special interest, to redistribute the container images and saving the storage space in your premises. There are also security reasons to minimize the unneeded application or environment available in one container image (e.g. if the container does not need a compiler, why should it be there? maybe it would enable to compile a rootkit). 
 
-It is of special interest in cases such as [SCAR](https://github.com/grycap/scar), that executes containers out of Docker images in AWS Lambda. In that case, the use cases are limited by the size of the container (the ephemeral storage space is limited to 512 Mb., and SCAR needs to pull the image from Docker Hub into the ephemeral storage and then uncompress it; so the maximum size for the container is even more restricted).
+In this sense, the publication of the NIST "[Application Container Security Guide](https://doi.org/10.6028/NIST.SP.800-190)" suggests that "_An image should only include the executables and libraries required by the app itself; all other OS functionality is provided by the OS kernel within the underlying host OS_".
 
-But there are also security reasons to minimize the unneeded application or environment available in one container image. In the case that the application fails, not having other applications reduces the impact of an intrusion (e.g. if the container does not need a compiler, why should it be there? maybe it would enable to compile a rootkit). 
-
-In this sense, the recent publication of the NIST "[Application Container Security Guide](https://doi.org/10.6028/NIST.SP.800-190)" suggests that "_An image should only include the executables and libraries required by the app itself; all other OS functionality is provided by the OS kernel within the underlying host OS_".
-
-**minicon** is a tool that enables a fine grain minimization for any type of filesystem, but it is possible to use it to reduce Docker images following the next pipeline:
+**minicon** is a tool that enables a fine grain minimization for any type of container (it is even interesting for non containerized boxes). Using it for Docker images consist in a simple pipeline:
 
 1. Preparing a Docker container with the dependencies of **minicon**
 1. Guessing the entrypoint and the default command for the container.
@@ -29,7 +23,7 @@ In this sense, the recent publication of the NIST "[Application Container Securi
 1. Using **importcon** to import the resulting file to copy the entrypoint and other settings.
 1. etc.
 
-**minidock** is a one-liner that automates that procedure to make that reducing a container consist in just to convert a
+**minidock** is a one-liner for that procedure whose aim is just to convert a
 
 ```bash
 $ docker run --rm -it myimage myapp
@@ -40,6 +34,8 @@ into
 ```bash
 $ minicon -i myimage -t myimage:minicon -- myapp
 ``` 
+
+To obtain the minimized Docker image, and hiding the internal procedure.
 
 ## 2. Installation
 
@@ -67,13 +63,13 @@ $ yum install ./minicon-1.2-1.noarch.rpm
 
 ### 2.2 From sources
 
-**minicon** are a set of bash scripts. So you just simply need to have a working linux with bash and the other dependencies installed and get the code:
+**minidock** is a bash script that runs the other applications in the _minicon_ package, to analyze the docker containers. So you just simply need to have a working linux with bash and the other dependencies installed and get the code:
 
 ```bash
 $ git clone https://github.com/grycap/minicon
 ```
 
-In that folder you'll have the **minicon**, **minidock** and other applications. The commands in the _minicon_ distribution must be in the PATH. So I would suggest to put it in the _/opt_ folder and set the proper PATH var. Otherwise leave it in a folder of your choice and set the PATH variable:
+In that folder you'll have the **minidock** application. Then the commands in the _minicon_ distribution must be in the PATH. So I would suggest to put it in the _/opt_ folder and set the proper PATH var. Otherwise leave it in a folder of your choice and set the PATH variable:
 
 ```bash
 $ mv minicon /opt
@@ -82,36 +78,50 @@ $ export PATH=$PATH:/opt/minicon
 
 #### 2.2.1 Dependencies
 
-**minidock** depends on the commands _minicon_, _importcon_ and _mergecon_, and the packages _jq_, _tar_ and _docker_. **minicon** and the others have dependencies on other packages. So, you need to install the proper packages in your system:
+**minidock** depends on the commands _minicon_, _importcon_ and _mergecon_, and the packages _jq_, _tar_ and _docker_. So, you need to install the proper packages in your system.
 
 **Ubuntu**
 
 ```bash
-$ apt-get install jq tar libc-bin tar file strace rsync
+$ apt-get install jq tar 
 ```
 
 **CentOS**
 ```bash
-$ yum install tar jq glibc-common file strace rsync which
+$ yum install tar jq which
 ```
-
 ## 3. Usage
 
-The **minidock suite** enables to prepare filesystems for running containers. The suite consists in the next commands: 
+**minidock** has a lot of options. You are advised to run ```./minidock --help``` to get the latest information about the usage of the application.
 
-1. **minidock** ([doc](doc/minidock.md)) analyzes one existing Docker image, reduces its footprint and leaves the new version in the local Docker registry. It makes use of the other tools in the _minicon_ package.
+The basic syntax is
 
-1. **minicon** ([doc](doc/minicon.md)) aims at reducing the footprint of the filesystem for the container, just adding those files that are needed. That means that the other files in the original container are removed.
+```bash
+$ ./minidock <options> <options for minicon> [ --docker-opts <options for docker> ] -- <run for the container>
+```
 
-1. **importcon** ([doc](doc/importcon.md)) importcon is a tool that imports the contents from a tarball to create a filesystem image using the "docker import" command. But it takes as reference an existing docker image to get parameters such as ENV, USER, WORKDIR, etc. to set them for the new imported image.
-
-1. **mergecon** ([doc](doc/mergecon.md)) is a tool that merges the filesystems of two different container images. It creates a new container image that is built from the combination of the layers of the filesystems of the input containers.
-
-Please refer to the documentation of each command to get help about them.
+Some of the options are:
+- \<run for the container\>: Is the whole commandline to be analised in the run. These are the same parameters that you would pass to "docker run ... <image> <run for the container>". 
+> * the aim is that you run "minidock" as if you used a "docker run" for your container.
+- **\<options for docker\>**: If you need them, you can include some options that will be raw-passed to the docker run command used during the analysis. (i.e. minidock will executedocker run <options generated> <options for docker> ...). Some examples are mapping volumes (i.e. **-v** Docker flag)
+- **\<options for minicon\>**: If you need to, you can add some minicon-specific options. The supported options are --include --exclude --plugin: --exclude will exclude some path, --include will include specific files or folder, and --plugin can be used to configure the _minicon_ plugins.
+- **--image \<image\>**: Name of the existing Docker image to minimize.
+- **--tag \<tag\>**: Tag for the resulting image (random if not provided).
+- **--mode \<mode\>**: Sets the mode to include the used files in the filesystem. There are 4 modes available _skinny_ (default), _slim_, _regular_ and _loose_.
+  * skinny only includes those files that have been used during the simulation of the commands.
+  * slim also includes some whole folders that have been opened.
+  * regular also includes any whole folder that have been checked to exist (e.g. stat).
+  * loose also includes the whole folders in which are stored the files that have been opened during the simulation.
+- **--default-cmd**: Analyze the default command for the containers in the original image.
+- **--apt**: Install the dependencies from minicon using apt-get commands (in the container used for the simulation).
+- **--yum**: Install the dependencies from minicon using yum commands (in the container used for the simulation).
+- **--execution \<full commandline execution\>**: Commandline to analyze when minimizing the container (i.e. that commandline should be able to be executed in the resulting container so the files, libraries, etc. needed should be included). 
+- **--run \<full commandline run\>**: Similar to _--execution_, but in this case, the Entrypoint is prepended to the commandline (docker exec vs docker run).
+- **-2 \<image\>**: If needed, you can merge the resulting minimized image with other. This is very specific for the "mergecon" tool. It is useful for (e.g.) adding a minimal Alpine distro (with _ash_ and so on) to the minimized filesystem.
+- **--verbose | -v**: Gives more information about the procedure.
+- **--debug**: Gives a lot more information about the procedure.
 
 ## 4. Examples
-
-In this section we are including examples on using **minidock**, that makes use of all the other commands. Please refer to the documentation of each command to get examples about each individual command.
 
 ### 4.1 Basic Ubuntu UI in less than 11 Mb.
 
@@ -404,3 +414,16 @@ minicon             uc6fat              1c8179d3ba94        4 hours ago         
 ```
 
 In this case, the size has been reduced from 206MB to about 43.3MB.
+
+# 5. Flexible Manipulation of Container Filesystems
+
+The **minidock suite** enables to prepare filesystems for running containers. The suite consists in **minidock**, [**minicon**](doc/minicon.md), [**mergecon**](doc/mergecon.md) and [**importcon**](doc/importcon.md):
+
+1. **minidock** ([direct link](minidock---minimization-of-docker-containers)) analyzes one existing Docker image, reduces its footprint and leaves the new version in the local Docker registry. It makes use of the other tools in the _minicon_ package.
+
+1. **minicon** ([direct link](doc/minicon.md)) aims at reducing the footprint of the filesystem for the container, just adding those files that are needed. That means that the other files in the original container are removed.
+
+1. **importcon** ([direct link](doc/importcon.md)) importcon is a tool that imports the contents from a tarball to create a filesystem image using the "docker import" command. But it takes as reference an existing docker image to get parameters such as ENV, USER, WORKDIR, etc. to set them for the new imported image.
+
+1. **mergecon** ([direct link](doc/mergecon.md)) is a tool that merges the filesystems of two different container images. It creates a new container image that is built from the combination of the layers of the filesystems of the input containers.
+

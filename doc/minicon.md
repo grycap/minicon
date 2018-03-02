@@ -155,6 +155,15 @@ $ ./minicon -t tarfile --plugin=strace:seconds=10 -E '/usr/games/cowsay hello'
 # The next execution will try to execute the application bash for 3 seconds (the default value), but will exclude any file used by the application that is found either in /dev or /proc
 $ ./minicon -t tarfile --plugin=strace:exclude=/dev:exclude=/proc bash
 ```
+**Parameters**
+
+  * _seconds_: The number of seconds while the simulation of the application will be ran. The execution may end earlier, but if not, it will be killed (with -9 signal). The default value is **3**.
+
+  * _execfile_: A file that contains examples of command invocation for applications. If an application is tried to be simulated without arguments, the strace plugin will search in this file for a better example. The default value is **None**.
+
+  * _mode_: decides which files will be included in the filesystem. The possible values are: _skinny_ (includes only the opened, checked, etc. files and creates the opened, checked, etc. folders), _slim_ (also includes the whole opened or created folders), _regular_ (also includes the whole folder in which the opened files are stored; useful for included libraries) and _loose_ (also includes the whole opened, checked, etc. folder). The default value is **skinny**.
+
+  * _showoutput_: If set to _true_, strace will output the output of the simulations to stdout and stderr. Otherwise, the simulation is hidden. If it the parameter appears without value, it will be interpreted to be _true_ (i.e. `--plugin=strace:showoutput` is the same than `--plugin=strace:showoutput=true`). The default value is **false**.
 
 #### scripts plug-in
 Some of the executables that you want to include in the resulting filesystem can be scripts (e.g. bash, perl, python, etc.). As an example, **minicon** is a bash script. The problem is that these scripts need an interpreter (i.e. bash is needed for **minicon**), but inspecting the executable using _ldd_ will not find any dependency.
@@ -167,6 +176,10 @@ To activate the strace plugin you can use the option ```--plugin```. Some exampl
 # The next call will try to identify whether the executable ./minicon is a script (it will find that it is), and will include /bin/bash in the filesystem.
 $ ./minicon -t tarfile --plugin=scripts ./minicon
 ```
+
+**Parameters**
+
+  * _includefolders_: If it is set to true, the scripts plugin will include in the final filesystem the whole folders in which the interpreter will search for packages (i.e. using _@inc_ or _include_). The default value is **false**.
 
 > **DISCLAIMER**: take into account that the _scripts_ plugin is an automated tool and tries to make its best. If a interpreter is detected, all the default include folder for that interpreter will be added to the final filesystem. If you know your app, you can reduce the number of folders to include. 
 
@@ -334,7 +347,7 @@ minicon             uc2fat              2a95d52068fd        2 minutes ago       
 But we can reduce the size, if we know which tools we want to provide to our users. From the folder in which it is installed **minicon**, we can execute the following commands to minimize the container and to import it into docker:
 
 ```
-$ docker run --privileged --rm -it -v /home/calfonso/Programacion/git/minicon:/tmp/minicon minicon:uc2fat bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/usecases/uc2/uc2.tar --plugin=strace:execfile=/tmp/minicon/usecases/uc2/execfile-cmd -E bash -E ssh -E ip -E id -E cat -E ls -E mkdir -E ping -E wget'
+$ docker run --cap-add SYS_PTRACE --rm -it -v /home/calfonso/Programacion/git/minicon:/tmp/minicon minicon:uc2fat bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/minicon/usecases/uc2/uc2.tar --plugin=strace:execfile=/tmp/minicon/usecases/uc2/execfile-cmd -E bash -E ssh -E ip -E id -E cat -E ls -E mkdir -E ping -E wget'
 $ docker import usecases/uc2/uc2.tar minicon:uc2
 ```
 

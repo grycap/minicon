@@ -2,12 +2,10 @@
 
 When you run containers (e.g. in Docker), you usually run a system that has a whole Operating System, documentation, extra packages, etc. and your specific application. The result is that the footprint of the container is bigger than needed.
 
-**minicon** aims at reducing the footprint of the Docker containers, by just including in the container those files that are needed. That means that the other files in the original container are removed.
-
 **minicon** is a general tool to analyze applications and executions of these applications to obtain a filesystem that contains all the dependencies that have been detected. In particular, it can be used to reduce Docker containers. The **minicon** package includes **minidock**
 which will help to reduce Docker containers by hiding the underlying complexity of running **minicon** inside a Docker container.
 
-The purpose of **minicon** and **minidock** is better understood with the use cases explained in depth in the section "[Examples](#4-examples)": the size of a basic UI that contains bash, ip, wget, ssh, etc. commands is _reduced from 211MB to 10.9MB_; the size of a NodeJS application along with the server is _reduced from 686 MB (using the official node image) to 45.6MB_; the size of an Apache server is _reduced from 216MB to 50.4MB_, and the size of a Perl application in a Docker container is _reduced from 206MB to 43.3MB_.
+The purpose of **minicon** and **minidock** is better understood with the use cases explained in depth in the section "[Examples](#4-examples)": the size of a basic UI that contains bash, ip, wget, ssh, etc. commands is _reduced from 211MB to 10.9MB_; the size of a NodeJS application along with the server is _reduced from 686 MB (using the official node image) to 45.6MB_; the size of an Apache server is _reduced from 216MB to 50.4MB_, and the size of a Perl application in a Docker container is _reduced from 206MB to 5.81MB_.
 
 > [**minidock**](doc/minidock.md) is based on [**minicon**](doc/minicon.md), [**importcon**](doc/importcon.md) and [**mergecon**](doc/mergecon.md), and hides the complexity of creating a container, mapping minicon, guessing parameters such as the entrypoint or the default command, creating the proper commandline, etc.
 
@@ -399,8 +397,8 @@ We can check the differences in the sizes:
 ```bash
 $ docker images minicon
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-minicon             uc6                 7c85b5a104f5        5 seconds ago       43.3MB
+minicon             uc6                 7c85b5a104f5        5 seconds ago       5.81MB
 minicon             uc6fat              1c8179d3ba94        4 hours ago         206MB
 ```
 
-In this case, the size has been reduced from 206MB to about 43.3MB.
+In this case, the size has been reduced from 206MB to about 5.81MB.

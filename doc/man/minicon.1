@@ -100,7 +100,12 @@ to check the dependencies of an application or library. The resulting dependenci
 .SS scripts
 This plugins tries to guess if a command is an interpreted script. If it is guessed to be, the interpreter will be also analyzed. It makes use of the command
 .I file
-and the analysis of the shebang line of text files.
+and the analysis of the shebang line of text files. It accepts the next optional parameter:
+
+.B includefolders
+If it is set to true, the scripts plugin will include in the final filesystem the whole folders in which the interpreter will search for packages (i.e. using @inc or include). The default value is 
+.B false.
+.B 3.
 
 .SS strace
 This plugin analyzes the execution of an application and detects which files have been used. It is tightened to the 
@@ -110,17 +115,28 @@ parameter from minicon. It accepts several parameters and the syntax is:
 --plugin=strace:param=value:param=value...
 
 .B seconds
-the number of seconds that strace will be analyzing the execution
+the number of seconds that strace will be analyzing the execution. The default value is 
+.B 3.
 
 .B mode
-decides which files will be included in the filesystem. The possible values are: skinny (includes only the opened, checked, etc. files and creates the opened, checked, etc. folders), slim (also includes the whole opened or created folders), regular (also includes the whole folder in which the opened files are stored; useful for included libraries) and loose (also includes the whole opened, checked, etc. folder).
+decides which files will be included in the filesystem. The possible values are: skinny (includes only the opened, checked, etc. files and creates the opened, checked, etc. folders), slim (also includes the whole opened or created folders), regular (also includes the whole folder in which the opened files are stored; useful for included libraries) and loose (also includes the whole opened, checked, etc. folder). The default value is
+.B skinny.
 
 .B execfile
 points to a file that includes commandline examples of different applications. These commandlines will be used for analyzing the executables. E.g. analyzing a plain 
 .I ping
 command has no sense, because it does nothing. But analyzing
 .I ping www.google.es
-makes use of libraries, name resolution, etc.
+makes use of libraries, name resolution, etc. The default value is
+.B none.
+
+.B showoutput
+If set to 
+.I true
+, strace will output the output of the simulations to stdout and stderr. Otherwise, the simulation is hidden. If it the parameter appears without value, it will be interpreted to be 
+.I true
+(i.e. `--plugin=strace:showoutput` is the same than `--plugin=strace:showoutput=true`). The default value is 
+.B false.
 
 .SH EXAMPLES
 
@@ -139,7 +155,7 @@ Then it is possible to import such filesystem into Docker with a command like
 The same run of minicon, but running it inside a Docker ubuntu-based container:
 
 .RS 3
-.B docker run --privileged --rm -it -v /bin/minicon:/tmp/minicon -v $PWD:/tmp/work ubuntu:latest bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/work/minimal.tar --plugin=strace -E bash -E "ssh localhost" -E "ip addr" -E id -E cat -E ls -E mkdir -E "ping -c 1 www.google.es" -- wget -q -O- www.google.es'
+.B docker run --cap-add SYS_PTRACE --rm -it -v /bin/minicon:/tmp/minicon -v $PWD:/tmp/work ubuntu:latest bash -c 'apt-get install -y strace && /tmp/minicon/minicon -t /tmp/work/minimal.tar --plugin=strace -E bash -E "ssh localhost" -E "ip addr" -E id -E cat -E ls -E mkdir -E "ping -c 1 www.google.es" -- wget -q -O- www.google.es'
 .RE
 
 

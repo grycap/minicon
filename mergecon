@@ -228,7 +228,7 @@ function get_config_field_raw() {
   echo "$(trim "$C_RESULT")"
 }
 
-VERSION=1.2-1
+VERSION=1.2-2
 
 function verify_dependencies() {
   if ! docker --version > /dev/null 2> /dev/null; then

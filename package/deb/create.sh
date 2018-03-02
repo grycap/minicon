@@ -56,20 +56,21 @@ if [ "$REVISION" != "" ]; then
 fi
 
 FNAME=build/minicon_${VERSION}${REVISION}
+rm -rf "$FNAME"
 mkdir -p "${FNAME}/bin"
 mkdir -p "${FNAME}/usr/share/man/man1"
 mkdir -p "${FNAME}/DEBIAN"
 
 for i in minicon mergecon minidock importcon; do
   $SRCFOLDER/bashflatten -C $SRCFOLDER/$i > "${FNAME}/bin/$i"
-  if [ -e "$MANFOLDER/$i" ]; then
-    cp "$MANFOLDER/$i" "${FNAME}/usr/share/man/man1/${i}.1"
+  if [ -e "$MANFOLDER/$i.1" ]; then
+    cp "$MANFOLDER/$i.1" "${FNAME}/usr/share/man/man1"
     gzip "${FNAME}/usr/share/man/man1/${i}.1"
   fi
 done
 
 chmod 755 ${FNAME}/bin/*
-chmod 644 ${FNAME}/man/man1/*
+chmod 644 ${FNAME}/usr/share/man/man1/*
 
 cat > "${FNAME}/DEBIAN/control" << EOF
 Package: minicon

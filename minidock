@@ -240,7 +240,7 @@ function trim() {
 function build_cmdline() {
   local SHCMDLINE=""
   while [ $# -gt 0 ]; do
-    if [ "$1" == "&&" -o "$1" == ">" -o "$1" == ">>" -o "$1" == "2>" -o "$1" == "2>>" -o "$1" == "<" -o "$1" == "<<" ]; then
+    if [ "$1" == "|" -o "$1" == "&&" -o "$1" == ">" -o "$1" == ">>" -o "$1" == "2>" -o "$1" == "2>>" -o "$1" == "<" -o "$1" == "<<" ]; then
       SHCMDLINE="${SHCMDLINE} $1"
     else
       SHCMDLINE="${SHCMDLINE} \"$1\""
@@ -259,9 +259,20 @@ function arrayze_cmd() {
   local _CMD="$2"
   local R n=0
   while read R; do
-    read ${AN}[n] <<< "$R"
+    read ${AN}[$n] <<< "$R"
     n=$((n+1))
   done < <(printf "%s\n" "$_CMD" | xargs -n 1 printf "%s\n")
+}
+
+function lines_to_array() {
+  local AN="$1"
+  local LINES="$2"
+  local L
+  local n=0
+  while read L; do
+    read ${AN}[$n] <<< "$L"
+    n=$((n+1))
+  done <<< "$LINES"
 }
 function generate_dockerimagename() {
   local NEWNAME
@@ -314,7 +325,7 @@ function get_config_field_raw() {
   echo "$(trim "$C_RESULT")"
 }
 
-VERSION=1.2-1
+VERSION=1.2-2
 
 n=0
 while [ $# -gt 0 ]; do
@@ -335,7 +346,7 @@ IMPORTCONOPTS=()
 MERGECONOPTS=()
 
 # The strace plugin needs the ability of process tracking (or privileged, but we do not want too much permissions)
-DOCKEROPTS=("--cap-add" "SYS_PTRACE")
+DOCKEROPTS=("--cap-add" "SYS_PTRACE" "-t")
 
 # minidock runs minicon with all the plugins activated
 MINICONOPTS=("--plugin-all")
@@ -366,6 +377,7 @@ while [ $n -lt ${#ARR[@]} ]; do
         --mode)                 n=$(($n+1))
                                 MINICONOPTS+=("--plugin=strace:mode=${ARR[$n]}")
                                 ;;
+        --show-cmd-output|-O)   MINICONOPTS+=("--plugin=strace:showoutput=true");;
         --execution|-E)         n=$(($n+1))
                                 SECONDARYEXECS+=("-E")
                                 SECONDARYEXECS+=("${ARR[$n]}");;
@@ -419,8 +431,10 @@ if [ "$NEWNAME" == "" ]; then
 fi
 
 # Get the Entrypoint and the default command
-CMDLINE_EP=($(get_config_field "$FROMIMAGE" "Entrypoint"))
-CMDLINE_CMD=($(get_config_field "$FROMIMAGE" "Cmd"))
+CMDLINE_CMD=()
+CMDLINE_EP=()
+lines_to_array CMDLINE_CMD "$(get_config_field "$FROMIMAGE" "Cmd")"
+lines_to_array CMDLINE_EP "$(get_config_field "$FROMIMAGE" "Entrypoint")"
 
 if [ "$CMDLINE_EP" == "null" ]; then
   CMDLINE_EP=()
@@ -436,7 +450,7 @@ fi
 
 TMPDIR=$(tempdir)
 REMOTEMINICON="/bin/minicon"
-MINICONFOLDER="-v $(readlink -e $MINICON):$REMOTEMINICON"
+MINICONFOLDER="-v $(readlink -e $MINICON):$REMOTEMINICON:ro"
 REMOTEWORKING="/minicon/work"
 WORKINGFOLDER="-v $TMPDIR:$REMOTEWORKING"
 

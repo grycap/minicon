@@ -285,6 +285,14 @@ function _strace_exec() {
     SECONDSSIM=3
   fi
 
+  local SHOWSTRACE
+  SHOWSTRACE=$(plugin_parameter "strace" "showoutput")
+  if [ $? -eq 0 ]; then
+    if [ "$SHOWSTRACE" == "" ]; then
+      SHOWSTRACE=true
+    fi
+  fi
+
   local MODE
   MODE="$(_strace_mode)"
 
@@ -295,9 +303,13 @@ function _strace_exec() {
   p_info "analysing ${COMMAND[@]} using strace and $SECONDSSIM seconds ($MODE)"
 
   local TMPFILE=$(tempfile)
-  {
-    timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" "${COMMAND[@]}" > /dev/null 2> /dev/null
-  } > /dev/null 2> /dev/null
+  if [ "$SHOWSTRACE" == "true" ]; then
+    timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" "${COMMAND[@]}"
+  else
+    {
+      timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" "${COMMAND[@]}" > /dev/null 2> /dev/null
+    } > /dev/null 2> /dev/null
+  fi
 
   # Now we'll inspect the files that the execution has used
   local EXEC_FUNCTIONS="exec.*"
@@ -474,7 +486,7 @@ function STRACE_command() {
     fi
     CMDLINE[0]="$COMMAND"
   fi
-  COMMAND=( ${CMDLINE[@]} )
+  COMMAND=( "${CMDLINE[@]}" )
   _strace_exec
 
   PLUGINS_ACTIVATED="${_PLUGINS_ACTIVATED}"
@@ -486,6 +498,17 @@ function PLUGIN_11_scripts() {
   # Checks the output of the invocation to the "file" command and guess whether it is a interpreted script or not
   #  If it is, adds the interpreter to the list of commands to add to the container
   p_debug "trying to guess if $1 is a interpreted script"
+
+  local INCLUDEFOLDERS
+  INCLUDEFOLDERS=$(plugin_parameter "scripts" "includefolders")
+  if [ $? -eq 0 ]; then
+    if [ "$INCLUDEFOLDERS" == "" ]; then
+      INCLUDEFOLDERS=true
+    fi
+  else
+    # The default value is to include the folders that the interpreter may use
+    INCLUDEFOLDERS=false
+  fi
 
   local S_PATH="$(which $1)"
   local ADD_PATHS=
@@ -519,10 +542,8 @@ function PLUGIN_11_scripts() {
   fi
 
   case "$(basename "$INTERPRETER")" in
-    perl) ADD_PATHS="${ADD_PATHS}
-$(perl -e "print qq(@INC)" | tr ' ' '\n' | grep -v -e '^/home' -e '^\.')";;
-    python) ADD_PATHS="${ADD_PATHS}
-$(python -c 'import sys;print "\n".join(sys.path)' | grep -v -e '^/home' -e '^\.')";;
+    perl) ;;
+    python) ;;
     bash) ;;
     sh) ;;
     env)  ADD_PATHS="${ADD_PATHS}
@@ -530,6 +551,16 @@ ${ENV_APP}";;
     *)    p_warning "interpreter $INTERPRETER not recognised"
           return 0;;
   esac
+
+  # If we want to include the 'include' folders of the scripts (to also include libraries), let's get them
+  if [ "$INCLUDEFOLDERS" == "true" ]; then
+    case "$(basename "$INTERPRETER")" in
+      perl) ADD_PATHS="${ADD_PATHS}
+$(perl -e "print qq(@INC)" | tr ' ' '\n' | grep -v -e '^/home' -e '^\.')";;
+      python) ADD_PATHS="${ADD_PATHS}
+$(python -c 'import sys;print "\n".join(sys.path)' | grep -v -e '^/home' -e '^\.')";;
+    esac
+  fi
 
   if [ "$ADD_PATHS" != "" ]; then
     p_debug "found that $S_PATH needs $ADD_PATHS"

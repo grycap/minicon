@@ -62,8 +62,8 @@ mkdir -p "${FNAME}/usr/share/man/man1"
 
 for i in minicon mergecon minidock importcon; do
   $SRCFOLDER/bashflatten -C $SRCFOLDER/$i > "${FNAME}/bin/$i"
-  if [ -e "$MANFOLDER/$i" ]; then
-    cp "$MANFOLDER/$i" "${FNAME}/usr/share/man/man1/${i}.1"
+  if [ -e "$MANFOLDER/$i.1" ]; then
+    cp "$MANFOLDER/$i.1" "${FNAME}/usr/share/man/man1/"
     gzip "${FNAME}/usr/share/man/man1/${i}.1"
   fi
 done

@@ -4,7 +4,7 @@ When you run Docker containers, you usually run a system that has a whole Operat
 
 **minidock** aims at reducing the footprint of the Docker containers, by just including in the container those files that are needed. That means that the other files in the original container are removed.
 
-The purpose of **minidock** is better understood with the use cases explained in depth in the section "[Examples](#4-examples)": the size of an Apache server is reduced from 216MB. to 50.4MB., and the size of a Perl application in a Docker container is reduced from 206MB to 50.4MB.
+The purpose of **minidock** is better understood with the use cases explained in depth in the section "[Examples](#4-examples)": the size of an Apache server is reduced from 216MB. to 50.4MB., and the size of a Perl application in a Docker container is reduced from 206MB to 5.81MB.
 
 
 > **minidock** is based on [**minicon**](minicon.md), [**importcon**](importcon.md) and [**mergecon**](mergecon.md), and hides the complexity of creating a container, mapping minicon, guessing parameters such as the entrypoint or the default command, creating the proper commandline, etc.
@@ -323,7 +323,7 @@ minicon             uc5fat              ff6f2573d73b        9 days ago          
 
 In order to reduce it, you just need to issue the next command:
 ```bash
-$ ./minidock -i minicon:uc5fat -t minicon:uc5 --apt
+$ minidock -i minicon:uc5fat -t minicon:uc5 --apt
 ...
 ```
 
@@ -378,7 +378,7 @@ $ docker run --rm -it minicon:uc6fat i am a cow in a fat container
 In this case, the entrypoint needs some parameters to be run. If you try to analyze the container simply issuing a command like the next one:
 
 ```bash
-$ ./minidock -i minicon:uc6fat -t minicon:uc6 --apt
+$ minidock -i minicon:uc6fat -t minicon:uc6 --apt
 ...
 $ docker run --rm -it minicon:uc6 i am a cow in a not properly minimized container
 cowsay: Could not find default.cow cowfile!
@@ -389,7 +389,7 @@ It does not work properly, because the execution of the entrypoint has not been 
 In this case, you should run a **minidock** commandline that include the command that we used to test it, and we will be able to run it:
 
 ```bash
-$ ./minidock -i minicon:uc6fat -t minicon:uc6 --apt -- i am a cow in a fat container
+$ minidock -i minicon:uc6fat -t minicon:uc6 --apt -- i am a cow in a fat container
 ...
 $ docker run --rm -it minicon:uc6 i am a cow in a minimized container
  _____________________________________
@@ -409,11 +409,11 @@ We can check the differences in the sizes:
 ```bash
 $ docker images minicon
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-minicon             uc6                 7c85b5a104f5        5 seconds ago       43.3MB
+minicon             uc6                 7c85b5a104f5        5 seconds ago       5.81MB
 minicon             uc6fat              1c8179d3ba94        4 hours ago         206MB
 ```
 
-In this case, the size has been reduced from 206MB to about 43.3MB.
+In this case, the size has been reduced from 206MB to about 5.81MB.
 
 # 5. Flexible Manipulation of Container Filesystems
 

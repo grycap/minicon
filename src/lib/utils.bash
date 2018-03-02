@@ -9,7 +9,7 @@ function trim() {
 function build_cmdline() {
   local SHCMDLINE=""
   while [ $# -gt 0 ]; do
-    if [ "$1" == "&&" -o "$1" == ">" -o "$1" == ">>" -o "$1" == "2>" -o "$1" == "2>>" -o "$1" == "<" -o "$1" == "<<" ]; then
+    if [ "$1" == "|" -o "$1" == "&&" -o "$1" == ">" -o "$1" == ">>" -o "$1" == "2>" -o "$1" == "2>>" -o "$1" == "<" -o "$1" == "<<" ]; then
       SHCMDLINE="${SHCMDLINE} $1"
     else
       SHCMDLINE="${SHCMDLINE} \"$1\""
@@ -28,7 +28,18 @@ function arrayze_cmd() {
   local _CMD="$2"
   local R n=0
   while read R; do
-    read ${AN}[n] <<< "$R"
+    read ${AN}[$n] <<< "$R"
     n=$((n+1))
   done < <(printf "%s\n" "$_CMD" | xargs -n 1 printf "%s\n")
+}
+
+function lines_to_array() {
+  local AN="$1"
+  local LINES="$2"
+  local L
+  local n=0
+  while read L; do
+    read ${AN}[$n] <<< "$L"
+    n=$((n+1))
+  done <<< "$LINES"
 }

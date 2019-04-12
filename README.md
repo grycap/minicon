@@ -36,7 +36,7 @@ $ docker run --rm -it myimage myapp
 into
 
 ```bash
-$ minicon -i myimage -t myimage:minicon -- myapp
+$ minidock -i myimage -t myimage:minicon -- myapp
 ``` 
 
 ## 2. Installation

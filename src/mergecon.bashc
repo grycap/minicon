@@ -47,20 +47,19 @@ $0 <options>
 EOF
 }
 
-source lib/debug.bash
-source lib/temp.bash
-source lib/dockerutils.bash
+source all.bashc
+source lib/dockerutils.bashc
 source version
 
 function verify_dependencies() {
   if ! docker --version > /dev/null 2> /dev/null; then
-    finalize 1 "docker command is needed"
+    bashc.finalize 1 "docker command is needed"
   fi
   if ! jq --version > /dev/null 2> /dev/null; then
-    finalize 1 "jq command is needed"
+    bashc.finalize 1 "jq command is needed"
   fi
   if ! tar --version > /dev/null 2> /dev/null; then
-    finalize 1 "tar command is needed"
+    bashc.finalize 1 "tar command is needed"
   fi
 }
 
@@ -97,61 +96,49 @@ function extract_image() {
 
   if [ "$IMAGENAME" != "" ]; then
     mkdir -p "$FOLDER"
-    local T="$(tempfile '.')"
+    local T="$(bashc.tempfile '.')"
     if ! docker inspect "$IMAGENAME" 2> /dev/null; then
       p_debug "retrieving image $IMAGENAME because it is not in the registry"
       if ! docker pull "$IMAGENAME" 2> /dev/null; then
-        finalize 1 "image $IMAGENAME could not be retrieved"
+        bashc.finalize 1 "image $IMAGENAME could not be retrieved"
       fi
     fi
     if ! docker save "$IMAGENAME" -o "$T" 2> /dev/null; then
-      finalize 1 "could not retrieve image $IMAGENAME"
+      bashc.finalize 1 "could not retrieve image $IMAGENAME"
     fi
     tar xf "$T" -C "$FOLDER"
     rm -f "$T"
   fi
 }
 
-n=0
-while [ $# -gt 0 ]; do
-    if [ "${1:0:1}" == "-" -a "${1:1:1}" != "-" -a "${1:1:1}" != "" ]; then
-        for f in $(echo "${1:1}" | sed 's/\(.\)/-\1 /g' ); do
-            ARR[$n]="$f"
-            n=$(($n+1))
-        done
-    else
-        ARR[$n]="$1"
-        n=$(($n+1))
-    fi
-    shift
-done
-
 TMPDIR=
 OUTFILE=
-n=0
-while [ $n -lt ${#ARR[@]} ]; do
-    PARAM="${ARR[$n]}"
-    case "$PARAM" in
-        --file|-f)              n=$(($n+1))
-                                OUTFILE="${ARR[$n]}";;
-        --continue|-c)          CONTINUE=true;;
-        --working|-w)           n=$(($n+1))
-                                TMPDIR="${ARR[$n]}";;
-        --tag|-t)               n=$(($n+1))
-                                MERGEDNAME="${ARR[$n]}";;
-        --first|-1)             n=$(($n+1))
-                                FIRSTIMAGE="${ARR[$n]}";;
-        --second|-2)            n=$(($n+1))
-                                SECONDIMAGE="${ARR[$n]}";;
-        --list|-l)              LISTLAYERS=true;;
-        --verbose|-v)           VERBOSE=true;;
-        --debug)                DEBUG=true;;
-        --version | -V)         echo "$VERSION" && finalize;;
-        --help | -h)            usage && finalize;;
-        --keeptemporary|-k)     KEEPTEMPORARY="true";;
-        *)                      usage && finalize 1;;
-    esac
-    n=$(($n+1))
+# Parse the commandline into an array
+bashc.parameter_parse_commandline "$@"
+bashc.parameters_start
+
+while bashc.parameters_next; do
+  PARAM="$(bashc.parameters_current)"
+  case "$PARAM" in
+    --file|-f)              bashc.parameters_next
+                            OUTFILE="$(bashc.parameters_current)";;
+    --continue|-c)          CONTINUE=true;;
+    --working|-w)           bashc.parameters_next
+                            TMPDIR="$(bashc.parameters_current)";;
+    --tag|-t)               bashc.parameters_next
+                            MERGEDNAME="$(bashc.parameters_current)";;
+    --first|-1)             bashc.parameters_next
+                            FIRSTIMAGE="$(bashc.parameters_current)";;
+    --second|-2)            bashc.parameters_next
+                            SECONDIMAGE="$(bashc.parameters_current)";;
+    --list|-l)              LISTLAYERS=true;;
+    --verbose|-v)           VERBOSE=true;;
+    --debug)                DEBUG=true;;
+    --version | -V)         echo "$VERSION" && bashc.finalize;;
+    --help | -h)            usage && bashc.finalize;;
+    --keeptemporary|-k)     KEEPTEMPORARY="true";;
+    *)                      usage && bashc.finalize 1;;
+  esac
 done
 
 verify_dependencies
@@ -161,7 +148,7 @@ if [ "$OUTFILE" != "" ]; then
 fi
 
 if [ "$TMPDIR" == "" ]; then
-  TMPDIR="$(tempdir)"
+  TMPDIR="$(bashc.tempdir)"
 else
   # To avoid removing the folder in case that is is provided in the commandline
   KEEPTEMPORARY=false
@@ -178,7 +165,7 @@ MERGEDNAME=$(correct_dockerimagename "$MERGEDNAME")
 p_debug "merging layers of image $SECONDIMAGE in $FIRSTIMAGE, into $MERGEDNAME"
 p_out "$MERGEDNAME"
 
-cd $TMPDIR 2> /dev/null || finalize 1 "could not change to folder $TMPDIR"
+cd $TMPDIR 2> /dev/null || bashc.finalize 1 "could not change to folder $TMPDIR"
 p_info "working folder: $TMPDIR"
 
 if [ "$CONTINUE" != "true" ]; then
@@ -204,7 +191,7 @@ if [ "$LISTLAYERS" == "true" ]; then
       p_out $n ${LAYERS_2[$n]}
     done
   fi
-  finalize
+  bashc.finalize
 fi
 
 if [ "$FIRSTIMAGE" == "" ]; then
@@ -216,7 +203,7 @@ if [ "$SECONDIMAGE" == "" ]; then
 fi
 
 if [ "$MANIFEST_1" == ""  -a "$MANIFEST_2" == "" ]; then
-  finalize 1 "missing manifests"
+  bashc.finalize 1 "missing manifests"
 fi
 
 p_debug "layers for image $FIRSTIMAGE: ${LAYERS_1[@]}"
@@ -253,5 +240,3 @@ else
   p_debug "loading new image in docker"
   docker load < <(tar c -C 1 .)
 fi
-
-finalize

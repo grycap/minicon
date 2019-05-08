@@ -83,41 +83,25 @@ EOF
 
 function verify_dependencies() {
   if [ ! -x "$MINICON" ]; then
-    finalize 1 "cannot find minicon"
+    bashc.finalize 1 "cannot find minicon"
   fi
   if [ ! -x "$IMPORTCON" ]; then
-    finalize 1 "cannot find importcon"
+    bashc.finalize 1 "cannot find importcon"
   fi
   if [ ! -x "$MERGECON" ]; then
-    finalize 1 "cannot find mergecon"
+    bashc.finalize 1 "cannot find mergecon"
   fi
   if ! docker --version > /dev/null 2> /dev/null; then
-    finalize 1 "docker command is needed to import the image"
+    bashc.finalize 1 "docker command is needed to import the image"
   fi
   if ! jq --version > /dev/null 2> /dev/null; then
-    finalize 1 "jq command is needed"
+    bashc.finalize 1 "jq command is needed"
   fi
 }
 
-source lib/debug.bash
-source lib/temp.bash
-source lib/utils.bash
-source lib/dockerutils.bash
+source all.bashc
+source lib/dockerutils.bashc
 source version
-
-n=0
-while [ $# -gt 0 ]; do
-    if [ "${1:0:1}" == "-" -a "${1:1:1}" != "-" -a "${1:1:1}" != "" ]; then
-        for f in $(echo "${1:1}" | sed 's/\(.\)/-\1 /g' ); do
-            ARR[$n]="$f"
-            n=$(($n+1))
-        done
-    else
-        ARR[$n]="$1"
-        n=$(($n+1))
-    fi
-    shift
-done
 
 TMPDIR=
 IMPORTCONOPTS=()
@@ -138,36 +122,46 @@ SECONDARYEXECS=()
 # Run the default command as a secondary execution
 EXECUTEDEFAULTCMD=false
 
-n=0
-while [ $n -lt ${#ARR[@]} ]; do
-    PARAM="${ARR[$n]}"
-    case "$PARAM" in
+# Parse the commandline into an array
+bashc.parameter_parse_commandline "$@"
+bashc.parameters_start
+
+while bashc.parameters_next; do
+  PARAM="$(bashc.parameters_current)"
+  case "$PARAM" in
         --default-cmd|-d)       EXECUTEDEFAULTCMD=true;;
         --apt)                  DEPENDENCIES_APT=true;;
         --yum)                  DEPENDENCIES_YUM=true;;
         --plugin=*)             MINICONOPTS+=("$PARAM");;
         --exclude|-e|--include|-I)
                                 MINICONOPTS+=("$PARAM")
-                                n=$(($n+1))
-                                MINICONOPTS+=("${ARR[$n]}");;
+                                bashc.parameters_next
+                                PARAM="$(bashc.parameters_current)"
+                                MINICONOPTS+=("$PARAM");;
         --mode=*)               MINICONOPTS+=("--plugin=strace:mode=${PARAM:7}")
                                 ;;
-        --mode)                 n=$(($n+1))
-                                MINICONOPTS+=("--plugin=strace:mode=${ARR[$n]}")
+        --mode)                 bashc.parameters_next
+                                PARAM="$(bashc.parameters_current)"
+                                MINICONOPTS+=("--plugin=strace:mode=$PARAM")
                                 ;;
         --show-cmd-output|-O)   MINICONOPTS+=("--plugin=strace:showoutput=true");;
-        --execution|-E)         n=$(($n+1))
+        --execution|-E)         bashc.parameters_next
+                                PARAM="$(bashc.parameters_current)"
                                 SECONDARYEXECS+=("-E")
-                                SECONDARYEXECS+=("${ARR[$n]}");;
-        --run|-R)               n=$(($n+1))
+                                SECONDARYEXECS+=("$PARAM");;
+        --run|-R)               bashc.parameters_next
+                                PARAM="$(bashc.parameters_current)"
                                 SECONDARYEXECS+=("-R")
-                                SECONDARYEXECS+=("${ARR[$n]}");;
-        --second|-2)            n=$(($n+1))
-                                SECONDIMAGE="${ARR[$n]}";;
-        --image|-i)             n=$(($n+1))
-                                FROMIMAGE="${ARR[$n]}";;
-        --tag|-t)               n=$(($n+1))
-                                NEWNAME="${ARR[$n]}";;
+                                SECONDARYEXECS+=("$PARAM");;
+        --second|-2)            bashc.parameters_next
+                                PARAM="$(bashc.parameters_current)"
+                                SECONDIMAGE="$PARAM";;
+        --image|-i)             bashc.parameters_next
+                                PARAM="$(bashc.parameters_current)"
+                                FROMIMAGE="$PARAM";;
+        --tag|-t)               bashc.parameters_next
+                                PARAM="$(bashc.parameters_current)"
+                                NEWNAME="$PARAM";;
         --simulate|-s)          SIMULATEONLY=true;;
         --verbose|-v)           MINICONOPTS+=("--verbose")
                                 IMPORTCONOPTS+=("--verbose")
@@ -177,31 +171,29 @@ while [ $n -lt ${#ARR[@]} ]; do
                                 IMPORTCONOPTS+=("--debug")
                                 MERGECONOPTS+=("--debug")
                                 DEBUG=true;;
-        --version | -V)         echo "$VERSION" && finalize;;
-        --help | -h)            usage && finalize;;
+        --version | -V)         echo "$VERSION" && bashc.finalize;;
+        --help | -h)            usage && bashc.finalize;;
         --keeptemporary|-k)     KEEPTEMPORARY="true";;
-        --docker-opts)          n=$(($n+1))
-                                while [ $n -lt ${#ARR[@]} -a "${ARR[$n]}" != "--" ]; do
-                                  DOCKEROPTS+=("${ARR[$n]}")
-                                  n=$(($n+1))
-                                done
-                                if [ "${ARR[$n]}" == "--" ]; then
-                                  n=$(($n-1))
-                                fi;;
-        --)                     n=$(($n+1))
-                                while [ $n -lt ${#ARR[@]} ]; do
-                                  MAINEXEC+=("${ARR[$n]}")
-                                  n=$(($n+1))
+        --docker-opts)          while bashc.parameters_next; do
+                                  PARAM="$(bashc.parameters_current)"
+                                  if [ "$PARAM" == "--" ]; then
+                                    bashc.parameters_prev
+                                    break
+                                  fi
+                                  DOCKEROPTS+=("$PARAM")
                                 done;;
-        *)                      usage && finalize 1 "invalid parameter $PARAM"
+        --)                     while bashc.parameters_next; do
+                                  PARAM="$(bashc.parameters_current)"
+                                  MAINEXEC+=("$PARAM")
+                                done;;
+        *)                      usage && bashc.finalize 1 "invalid parameter $PARAM"
     esac
-    n=$(($n+1))
 done
 
 verify_dependencies
 
 if [ "$FROMIMAGE" == "" ]; then
-  finalize 1 "you have to state the image to minimize (flag -i)"
+  bashc.finalize 1 "you have to state the image to minimize (flag -i)"
 fi
 
 if [ "$NEWNAME" == "" ]; then
@@ -211,8 +203,8 @@ fi
 # Get the Entrypoint and the default command
 CMDLINE_CMD=()
 CMDLINE_EP=()
-lines_to_array CMDLINE_CMD "$(get_config_field "$FROMIMAGE" "Cmd")"
-lines_to_array CMDLINE_EP "$(get_config_field "$FROMIMAGE" "Entrypoint")"
+bashc.lines_to_array CMDLINE_CMD "$(get_config_field "$FROMIMAGE" "Cmd")"
+bashc.lines_to_array CMDLINE_EP "$(get_config_field "$FROMIMAGE" "Entrypoint")"
 
 if [ "$CMDLINE_EP" == "null" ]; then
   CMDLINE_EP=()
@@ -226,7 +218,7 @@ else
   p_debug "found Cmd: ${CMDLINE_CMD[@]}"
 fi
 
-TMPDIR=$(tempdir)
+TMPDIR=$(bashc.tempdir)
 REMOTEMINICON="/bin/minicon"
 MINICONFOLDER="-v $(readlink -e $MINICON):$REMOTEMINICON:ro"
 REMOTEWORKING="/minicon/work"
@@ -238,16 +230,16 @@ p_info "minimizing container using minicon"
 DEPENDENCIES=
 if [ "$DEPENDENCIES_APT" == "true" ]; then
   if [ "$DEBUG" == "true" ]; then
-    DEPENDENCIES="$(build_cmdline apt-get -y update \&\& apt-get -y install bash libc-bin tar rsync file strace \&\&)"
+    DEPENDENCIES="$(bashc.build_cmdline apt-get -y update \&\& apt-get -y install bash libc-bin tar rsync file strace \&\&)"
   else
-    DEPENDENCIES="$(build_cmdline apt-get -y update \> /dev/null 2\> /dev/null \&\& apt-get -y install bash libc-bin tar rsync file strace \> /dev/null 2\> /dev/null \&\&)"
+    DEPENDENCIES="$(bashc.build_cmdline apt-get -y update \> /dev/null 2\> /dev/null \&\& apt-get -y install bash libc-bin tar rsync file strace \> /dev/null 2\> /dev/null \&\&)"
   fi
 else
   if [ "$DEPENDENCIES_YUM" == "true" ]; then
     if [ "$DEBUG" == "true" ]; then
-      DEPENDENCIES="$(build_cmdline yum install -y bash tar rsync file strace which \&\&)"
+      DEPENDENCIES="$(bashc.build_cmdline yum install -y bash tar rsync file strace which \&\&)"
     else
-      DEPENDENCIES="$(build_cmdline yum install -y bash tar rsync file strace which \> /dev/null 2\> /dev/null \&\&)"
+      DEPENDENCIES="$(bashc.build_cmdline yum install -y bash tar rsync file strace which \> /dev/null 2\> /dev/null \&\&)"
     fi
   fi
 fi
@@ -283,7 +275,7 @@ fi
 # If we still do not have a main execution, let's try if the user added additional executions or runs and we'll get the first one as the main one
 if [ "${MAINEXEC}" == "" ]; then
   if [ ${#SECONDARYEXECS[@]} -gt 0 ]; then
-    arrayze_cmd MAINEXEC "${SECONDARYEXECS[@]:1:1}"
+    bashc.arrayze_cmd MAINEXEC "${SECONDARYEXECS[@]:1:1}"
     if [ "${SECONDARYEXECS[0]}" == "-E" ]; then
       ADDEPTOMAINEXEC=false
       p_info "using the first execution as the main execution"
@@ -339,7 +331,7 @@ if [ "$CMDLINE_EP" != "" -a "$ADDEPTOMAINEXEC" == "true" ]; then
 fi
 
 if [ ${#MAINEXEC} -eq 0 ]; then
-  finalize 1 "no execution available (neither default execution, main execution or additional execution)"
+  bashc.finalize 1 "no execution available (neither default execution, main execution or additional execution)"
 fi
 
 # Add the main execution
@@ -347,16 +339,16 @@ MINICONOPTS+=("--")
 MINICONOPTS+=("${MAINEXEC[@]}")
 
 p_debug docker run --rm $MINICONFOLDER $WORKINGFOLDER --entrypoint "" "${DOCKEROPTS[@]}" "$FROMIMAGE" \
-  sh -c "${DEPENDENCIES}$(build_cmdline "$REMOTEMINICON" "-t" "$REMOTEWORKING/image.tar" "${MINICONOPTS[@]}")"
+  sh -c "${DEPENDENCIES}$(bashc.build_cmdline "$REMOTEMINICON" "-t" "$REMOTEWORKING/image.tar" "${MINICONOPTS[@]}")"
 
 if [ "$SIMULATEONLY" == "true" ]; then
   p_warning "not executing because only wanted to simulate"
 else
   docker run --rm $MINICONFOLDER $WORKINGFOLDER --entrypoint "" "${DOCKEROPTS[@]}" "$FROMIMAGE" \
-    sh -c "${DEPENDENCIES}$(build_cmdline "$REMOTEMINICON" "-t" "$REMOTEWORKING/image.tar" "${MINICONOPTS[@]}")"
+    sh -c "${DEPENDENCIES}$(bashc.build_cmdline "$REMOTEMINICON" "-t" "$REMOTEWORKING/image.tar" "${MINICONOPTS[@]}")"
 
   if [ $? -ne 0 ]; then
-    finalize 1 "failed to run minicon"
+    bashc.finalize 1 "failed to run minicon"
   fi
 fi
 
@@ -374,7 +366,7 @@ else
   IMAGENAME="$($IMPORTCON $IMPORTCONOPTS -i "$FROMIMAGE" -t "$NEWNAME" -A $TMPDIR/image.tar)"
 
   if [ $? -ne 0 ]; then
-    finalize 1 "failed to run importcon"
+    bashc.finalize 1 "failed to run importcon"
   fi
 fi
 
@@ -382,7 +374,7 @@ p_info "image $IMAGENAME imported"
 p_out "$IMAGENAME"
 
 if [ "$SECONDIMAGE" == "" ]; then
-  finalize
+  bashc.finalize
 fi
 
 # Merge the container (if requested)
@@ -395,8 +387,6 @@ else
   $MERGECON "${MERGECONOPTS[@]}" -1 "$IMAGENAME" -2 "$SECONDIMAGE" -t "$IMAGENAME"
 
   if [ $? -ne 0 ]; then
-    finalize 1 "failed to run mergecon"
+    bashc.finalize 1 "failed to run mergecon"
   fi
 fi
-
-finalize

@@ -31,7 +31,7 @@ function get_config_field() {
   fi
 
   C_RESULT="$(echo "$_INSPECT_STRING" | jq -r "if .[].Config.${FIELD} != null then if .[].Config.${FIELD}${RAW_JQ} | type == \"array\" then .[].Config.${FIELD}${RAW_JQ} | .[] else .[].Config.${FIELD}${RAW_JQ} end else null end")"
-  echo "$(trim "$C_RESULT")"
+  echo "$(bashc.trim "$C_RESULT")"
 }
 
 function get_config_field_raw() {
@@ -46,5 +46,5 @@ function get_config_field_raw() {
   fi
 
   C_RESULT="$(echo "$_INSPECT_STRING" | jq -r "if .[].Config.${FIELD} != null then .[].Config.${FIELD}${RAW_JQ} else null end")"
-  echo "$(trim "$C_RESULT")"
+  echo "$(bashc.trim "$C_RESULT")"
 }

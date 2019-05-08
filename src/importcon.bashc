@@ -52,69 +52,54 @@ EOF
 
 function verify_dependencies() {
   if ! docker --version > /dev/null 2> /dev/null; then
-    finalize 1 "docker command is needed to import the image"
+    bashc.finalize 1 "docker command is needed to import the image"
   fi
   if ! jq --version > /dev/null 2> /dev/null; then
-    finalize 1 "jq command is needed"
+    bashc.finalize 1 "jq command is needed"
   fi
 }
 
-source lib/debug.bash
-source lib/temp.bash
-source lib/utils.bash
-source lib/dockerutils.bash
+source all.bashc
+source lib/dockerutils.bashc
 source version
 
-n=0
-while [ $# -gt 0 ]; do
-    if [ "${1:0:1}" == "-" -a "${1:1:1}" != "-" -a "${1:1:1}" != "" ]; then
-        for f in $(echo "${1:1}" | sed 's/\(.\)/-\1 /g' ); do
-            ARR[$n]="$f"
-            n=$(($n+1))
-        done
-    else
-        ARR[$n]="$1"
-        n=$(($n+1))
-    fi
-    shift
-done
-
 OUTFILE=
-n=0
+# Parse the commandline into an array
+bashc.parameter_parse_commandline "$@"
+bashc.parameters_start
 
-while [ $n -lt ${#ARR[@]} ]; do
-    PARAM="${ARR[$n]}"
-    case "$PARAM" in
-        --image|-i)             n=$(($n+1))
-                                FROMIMAGE="${ARR[$n]}";;
-        --tag|-t)               n=$(($n+1))
-                                NEWNAME="${ARR[$n]}";;
-        --env|-E)               COPY_ENV=true;;
-        --entrypoint|-e)        COPY_ENTRYPOINT=true;;
-        --expose|-x)            COPY_EXPOSE=true;;
-        --onbuild|-o)           COPY_ONBUILD=true;;
-        --user|-u)              COPY_USER=true;;
-        --volume|-V)            COPY_VOLUME=true;;
-        --workdir|-w)           COPY_WORKDIR=true;;
-        --cmd|-c)               COPY_CMD=true;;
-        --all|-A)               COPY_ENV=true
-                                COPY_ENTRYPOINT=true
-                                COPY_EXPOSE=true
-                                COPY_ONBUILD=true
-                                COPY_USER=true
-                                COPY_VOLUME=true
-                                COPY_WORKDIR=true
-                                COPY_CMD=true;;
-        --simulate|-s)          SIMULATEONLY=true;;
-        --verbose|-v)           VERBOSE=true;;
-        --debug)                DEBUG=true;;
-        --version | -V)         echo "$VERSION" && finalize;;
-        --help | -h)            usage && finalize;;
-        --keeptemporary|-k)     KEEPTEMPORARY="true";;
-        *)                      [ "$FILENAME" != "" ] && usage && finalize 1 "invalid parameter $PARAM. already provided a filename"
-                                FILENAME="$PARAM";;
-    esac
-    n=$(($n+1))
+while bashc.parameters_next; do
+  PARAM="$(bashc.parameters_current)"
+  case "$PARAM" in
+    --image|-i)             bashc.parameters_next
+                            FROMIMAGE="$(bashc.parameters_current)";;
+    --tag|-t)               bashc.parameters_next
+                            NEWNAME="$(bashc.parameters_current)";;
+    --env|-E)               COPY_ENV=true;;
+    --entrypoint|-e)        COPY_ENTRYPOINT=true;;
+    --expose|-x)            COPY_EXPOSE=true;;
+    --onbuild|-o)           COPY_ONBUILD=true;;
+    --user|-u)              COPY_USER=true;;
+    --volume|-V)            COPY_VOLUME=true;;
+    --workdir|-w)           COPY_WORKDIR=true;;
+    --cmd|-c)               COPY_CMD=true;;
+    --all|-A)               COPY_ENV=true
+                            COPY_ENTRYPOINT=true
+                            COPY_EXPOSE=true
+                            COPY_ONBUILD=true
+                            COPY_USER=true
+                            COPY_VOLUME=true
+                            COPY_WORKDIR=true
+                            COPY_CMD=true;;
+    --simulate|-s)          SIMULATEONLY=true;;
+    --verbose|-v)           VERBOSE=true;;
+    --debug)                DEBUG=true;;
+    --version | -V)         echo "$VERSION" && bashc.finalize;;
+    --help | -h)            usage && bashc.finalize;;
+    --keeptemporary|-k)     KEEPTEMPORARY="true";;
+    *)                      [ "$FILENAME" != "" ] && usage && bashc.finalize 1 "invalid parameter $PARAM. already provided a filename"
+                            FILENAME="$PARAM";;
+  esac
 done
 
 verify_dependencies
@@ -124,7 +109,7 @@ if [ "$FILENAME" != "" ]; then
 fi
 
 if [ "$VALIDFILENAME" == "" ]; then
-  finalize 1 "filename '$FILENAME' is invalid"
+  bashc.finalize 1 "filename '$FILENAME' is invalid"
 fi
 
 FILENAME="$VALIDFILENAME"
@@ -185,5 +170,3 @@ if [ "$SIMULATEONLY" != "true" ]; then
 else
   p_warning "not executed because of commandline options"
 fi
-
-finalize

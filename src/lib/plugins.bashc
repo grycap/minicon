@@ -21,6 +21,19 @@ function plugin_parameter() {
   return 1
 }
 
+# Credits fot this function go to https://stackoverflow.com/a/18898782
+# Return relative path from canonical absolute dir path $1 to canonical
+# absolute dir path $2 ($1 and/or $2 may end with one or no "/").
+# Does only need POSIX shell builtins (no external command)
+function relPath () {
+    local common path up
+    common=${1%/} path=${2%/}/
+    while test "${path#"$common"/}" = "$path"; do
+        common=${common%/*} up=../$up
+    done
+    path=$up${path#"$common"/}; path=${path%/}; printf %s "${path:-.}"
+}
+
 function buildpaths() {
   local S_PATH="$1"
   local L_PATH="$S_PATH"
@@ -302,7 +315,7 @@ function _strace_exec() {
 
   p_info "analysing ${COMMAND[@]} using strace and $SECONDSSIM seconds ($MODE)"
 
-  local TMPFILE=$(tempfile)
+  local TMPFILE=$(bashc.tempfile)
   if [ "$SHOWSTRACE" == "true" ]; then
     timeout -s 9 $SECONDSSIM strace -qq -e file -fF -o "$TMPFILE" "${COMMAND[@]}"
   else
@@ -334,7 +347,7 @@ function _strace_exec() {
   # appear in the resulting filesystem, but libraries are analyzed)
   # FUNCTIONS="stat|lstat"
 
-  push_logger "PLAIN"
+  bashc.push_logger "PLAIN"
   STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
     if [ "$L" != "" -a "$L" != "/" -a "$L" != "." -a "$L" != ".." ]; then
@@ -350,11 +363,11 @@ function _strace_exec() {
       fi
     fi
   done <<< "$(analyze_strace_strings "$STRINGS")"
-  pop_logger
+  bashc.pop_logger
 
   # If the mode is slim, we'll also copy the whole opened (or created) folders
   if [ "$MODE" == "slim" -o "$MODE" == "regular" -o "$MODE" == "loose" ]; then
-    push_logger "OPENDIRS"
+    bashc.push_logger "OPENDIRS"
     local FUNCTIONS="open|mkdir"
     STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
     while read L; do
@@ -364,12 +377,12 @@ function _strace_exec() {
         fi
       fi
     done <<< "$(analyze_strace_strings "$STRINGS")"
-    pop_logger
+    bashc.pop_logger
   fi
 
   # If the mode is regular, we'll copy the whole folders used
   if [ "$MODE" == "loose" ]; then
-    push_logger "COPYDIRS"
+    bashc.push_logger "COPYDIRS"
     STRINGS="$(cat "$TMPFILE" | grep -vE "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
     while read L; do
       if [ "$L" != "" ]; then
@@ -379,12 +392,12 @@ function _strace_exec() {
         fi
       fi
     done <<< "$(analyze_strace_strings "$STRINGS")"
-    pop_logger
+    bashc.pop_logger
   fi
 
   # If the mode is slim, we'll also copy the whole opened (or created) folders
   if [ "$MODE" == "regular" -o "$MODE" == "loose" ]; then
-    push_logger "DIRSFROMFILES"
+    bashc.push_logger "DIRSFROMFILES"
     local FUNCTIONS="open"
     STRINGS="$(cat "$TMPFILE" | grep -E "($FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
     while read L; do
@@ -392,18 +405,18 @@ function _strace_exec() {
         _strace_copy_folder "$L"
       fi
     done <<< "$(analyze_strace_strings "$STRINGS")"
-    pop_logger
+    bashc.pop_logger
   fi
 
   # Add all the executables that have been executed (they are analyzed).
   # FUNCTIONS="exec.*"
 
-  push_logger "EXEC"  
+  bashc.push_logger "EXEC"  
   STRINGS="$(cat "$TMPFILE" | grep -E "($EXEC_FUNCTIONS)\(" | grep -o '"[^"]*"' | sort -u)"  
   while read L; do
     [ "$L" != "" ] && add_command "$L"
   done <<< "$(analyze_strace_strings "$STRINGS")"
-  pop_logger
+  bashc.pop_logger
 
   rm "$TMPFILE"
 
@@ -430,7 +443,7 @@ function PLUGIN_10_strace() {
     local L 
     while read L; do
       CMDTOEXEC=
-      arrayze_cmd CMDLINE "$L"
+      bashc.arrayze_cmd CMDLINE "$L"
       n=0
       while [ $n -lt ${#CMDLINE[@]} ]; do
         if [ "${CMDLINE[$n]}" == "$COMMAND" ]; then
@@ -460,9 +473,9 @@ function STRACE_command() {
   local CMDLINE=()
   local COMMAND
 
-  push_logger "STRACE"
+  bashc.push_logger "STRACE"
 
-  arrayze_cmd CMDLINE "$1"
+  bashc.arrayze_cmd CMDLINE "$1"
   local _PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED}"
 
   if [ "${CMDLINE[0]}" != "" ]; then
@@ -472,7 +485,7 @@ function STRACE_command() {
 
     if [ "$N_PATH" != "" -a "$OPTIONS" != "" ]; then
       # Remove the possible leading spaces before the options
-      OPTIONS="$(trim "$OPTIONS")"
+      OPTIONS="$(bashc.trim "$OPTIONS")"
       p_info "specific options to strace: $OPTIONS"
       PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED},strace:${OPTIONS}"
       S_PATH="$N_PATH"
@@ -481,7 +494,7 @@ function STRACE_command() {
     COMMAND="$(which -- $S_PATH)"
     if [ "$COMMAND" == "" ]; then
       p_debug "cannot analize $S_PATH using strace"
-      pop_logger
+      bashc.pop_logger
       return 0
     fi
     CMDLINE[0]="$COMMAND"
@@ -491,7 +504,7 @@ function STRACE_command() {
 
   PLUGINS_ACTIVATED="${_PLUGINS_ACTIVATED}"
 
-  pop_logger
+  bashc.pop_logger
 }
 
 function PLUGIN_11_scripts() {

@@ -90,19 +90,16 @@ function verify_dependencies() {
   fi
   if [ "$TARFILE" != "" ]; then
     if ! tar --version > /dev/null 2> /dev/null; then
-      finalize 1 "tar command is needed to create tar files"
+      bashc.finalize 1 "tar command is needed to create tar files"
     fi
   fi
   if ! ldd --version > /dev/null 2> /dev/null; then
-    finalize 1 "ldd command is needed for scripts plugin"
+    bashc.finalize 1 "ldd command is needed for scripts plugin"
   fi
 }
 
-source lib/debug.bash
-source lib/temp.bash
-source lib/config.bash
-source lib/utils.bash
-source plugins.bash
+source all.bashc
+source lib/plugins.bashc
 source version
 
 function is_protected() {
@@ -280,19 +277,6 @@ function copy() {
   cp_wrapper $RECURSE "$SRC" "$ROOTFS"
 }
 
-# Credits fot this function go to https://stackoverflow.com/a/18898782
-# Return relative path from canonical absolute dir path $1 to canonical
-# absolute dir path $2 ($1 and/or $2 may end with one or no "/").
-# Does only need POSIX shell builtins (no external command)
-function relPath () {
-    local common path up
-    common=${1%/} path=${2%/}/
-    while test "${path#"$common"/}" = "$path"; do
-        common=${common%/*} up=../$up
-    done
-    path=$up${path#"$common"/}; path=${path%/}; printf %s "${path:-.}"
-}
-
 function is_plugin_active() {
   # Checks whether a plugin is activated or not
   if [[ "$PLUGINS_ACTIVATED" =~ (^|,)$1(|:[^,]+)(,|$) ]]; then
@@ -326,61 +310,51 @@ COMMANDS_TO_ADD=()
 EXECUTIONS=()
 FORCEFOLDER=false
 ROOTFS=
-n=0
-while [ $# -gt 0 ]; do
-    if [ "${1:0:1}" == "-" -a "${1:1:1}" != "-" -a "${1:1:1}" != "" ]; then
-        for f in $(echo "${1:1}" | sed 's/\(.\)/-\1 /g' ); do
-            ARR[$n]="$f"
-            n=$(($n+1))
-        done
-    else
-        ARR[$n]="$1"
-        n=$(($n+1))
-    fi
-    shift
-done
-
 LDCONFIGFILE=/etc/ld.so.conf
 MAINEXECUTION=()
-n=0
-while [ $n -lt ${#ARR[@]} ]; do
-    PARAM="${ARR[$n]}"
-    case "$PARAM" in
-        --plugin-all)           PLUGINS_ACTIVATED="$(plugin_list),${PLUGINS_ACTIVATED}";;
-        --plugin=*)             PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED},${PARAM:9}";;
-        --exclude|-e)           n=$(($n+1))
-                                EXCLUDED_PATHS+=("${ARR[$n]}");;
-        --no-exclude-common|-C) NOEXCLUDECOMMON=true;;
-        --include|-I)           n=$(($n+1))
-                                INCLUDED_PATHS+=("${ARR[$n]}");;
-        --logfile|-g)           n=$(($n+1))
-                                LOGFILE="${ARR[$n]}";;
-        --quiet|-q)             QUIET=true;;
-        --tarfile|-t)           n=$(($n+1))
-                                TARFILE="${ARR[$n]}";;
-        --ldconfig|-l)          LDCONFIGFILE=/etc/ld.so.conf;;
-        --no-ldconfig|-L)       LDCONFIGFILE=;;
-        --verbose|-v)           VERBOSE=true;;
-        --debug)                DEBUG=true;;
-        --force|-f)             FORCEFOLDER=true;;
-        --rootfs|-r)            n=$(($n+1))
-                                ROOTFS="${ARR[$n]}"
-                                if [ ! -d "$(dirname $ROOTFS)" ]; then
-                                  finalize 1 "invalid folder (parent folder must exist)"
-                                fi;;
-        --execution|-E)         n=$(($n+1))
-                                EXECUTIONS+=("${ARR[$n]}");;
-        --version | -V)         echo "$VERSION" && finalize;;
-        --help | -h)            usage && finalize;;
-        --)                     n=$(($n+1))
-                                while [ $n -lt ${#ARR[@]} ]; do
-                                  PARAM="${ARR[$n]}"
-                                  MAINEXECUTION+=("$PARAM")
-                                  n=$(($n+1))
-                                done;;
-        *)                      usage && finalize 1 "unexpected parameter: $PARAM";;
-    esac
-    n=$(($n+1))
+
+# Parse the commandline into an array
+bashc.parameter_parse_commandline "$@"
+bashc.parameters_start
+
+while bashc.parameters_next; do
+  PARAM="$(bashc.parameters_current)"
+  case "$PARAM" in
+    --plugin-all)           PLUGINS_ACTIVATED="$(plugin_list),${PLUGINS_ACTIVATED}";;
+    --plugin=*)             PLUGINS_ACTIVATED="${PLUGINS_ACTIVATED},${PARAM:9}";;
+    --exclude|-e)           bashc.parameters_next
+                            PARAM="$(bashc.parameters_current)"
+                            EXCLUDED_PATHS+=("$PARAM");;
+    --no-exclude-common|-C) NOEXCLUDECOMMON=true;;
+    --include|-I)           bashc.parameters_next
+                            PARAM="$(bashc.parameters_current)"
+                            INCLUDED_PATHS+=("$PARAM");;
+    --logfile|-g)           bashc.parameters_next
+                            LOGFILE="$(bashc.parameters_current)";;
+    --quiet|-q)             QUIET=true;;
+    --tarfile|-t)           bashc.parameters_next
+                            TARFILE="$(bashc.parameters_current)";;
+    --ldconfig|-l)          LDCONFIGFILE=/etc/ld.so.conf;;
+    --no-ldconfig|-L)       LDCONFIGFILE=;;
+    --verbose|-v)           VERBOSE=true;;
+    --debug)                DEBUG=true;;
+    --force|-f)             FORCEFOLDER=true;;
+    --rootfs|-r)            bashc.parameters_next
+                            ROOTFS="$(bashc.parameters_current)"
+                            if [ ! -d "$(dirname $ROOTFS)" ]; then
+                              bashc.finalize 1 "invalid folder (parent folder must exist)"
+                            fi;;
+    --execution|-E)         bashc.parameters_next
+                            PARAM="$(bashc.parameters_current)"
+                            EXECUTIONS+=("$PARAM");;
+    --version | -V)         echo "$VERSION" && bashc.finalize;;
+    --help | -h)            usage && bashc.finalize;;
+    --)                     while bashc.parameters_next; do
+                              PARAM="$(bashc.parameters_current)"
+                              MAINEXECUTION+=("$PARAM")
+                            done;;
+    *)                      usage && bashc.finalize 1 "unexpected parameter: $PARAM";;
+  esac
 done
 
 [ "$QUIET" == "true" ] && DEBUG= VERBOSE=
@@ -396,13 +370,13 @@ fi
 # Add the main execution in first place
 CURRENT_CMD=()
 if [ ${#MAINEXECUTION} -gt 0 ]; then
-  EXECUTIONS=("$(build_cmdline "${MAINEXECUTION[@]}")" "${EXECUTIONS[@]}")
+  EXECUTIONS=("$(bashc.build_cmdline "${MAINEXECUTION[@]}")" "${EXECUTIONS[@]}")
 fi
 
 # Now manage the executions
 if [ ${#EXECUTIONS[@]} -gt 0 ]; then
   for ((n=0;n<${#EXECUTIONS[@]};n=n+1)); do
-    arrayze_cmd CURRENT_CMD "${EXECUTIONS[$n]}"
+    bashc.arrayze_cmd CURRENT_CMD "${EXECUTIONS[$n]}"
 
     # Remove the possible options to the strace command
     _CURRENT_CMD="${CURRENT_CMD[0]}"
@@ -414,26 +388,26 @@ if [ ${#EXECUTIONS[@]} -gt 0 ]; then
 fi
 
 if [ "$TARFILE" != "" -a "$ROOTFS" == "" ]; then
-  ROOTFS=$(tempdir)
+  ROOTFS=$(bashc.tempdir)
   FORCEFOLDER=true
 fi
 
-[ "$ROOTFS" == "" ] && finalize 1 "you must provide a folder (--rootfs) to create the root filesystem or request a tar file (--tarfile)"
+[ "$ROOTFS" == "" ] && bashc.finalize 1 "you must provide a folder (--rootfs) to create the root filesystem or request a tar file (--tarfile)"
 
 ROOTFS="$(readlink -f "$ROOTFS")"
-[ "$ROOTFS" == "" ] && finalize 1 "invalid folder to create the root filesystem (the parent folder MUST exist)"
+[ "$ROOTFS" == "" ] && bashc.finalize 1 "invalid folder to create the root filesystem (the parent folder MUST exist)"
 
 DANGER_FOLDERS="/ /etc /var /sys /proc"
 for F in $DANGER_FOLDERS; do
-  [ "$ROOTFS" == "$F" ] && finalize "refusing to build root filesystem in folder $ROOTFS"
+  [ "$ROOTFS" == "$F" ] && bashc.finalize "refusing to build root filesystem in folder $ROOTFS"
 done
   
-[ -e "$ROOTFS" -a ! -d "$ROOTFS" ] && finalize 1 "$ROOTFS exists but it is not a folder"
+[ -e "$ROOTFS" -a ! -d "$ROOTFS" ] && bashc.finalize 1 "$ROOTFS exists but it is not a folder"
 
 if [ "$FORCEFOLDER" != "true" -a -d "$ROOTFS" ]; then
   read -p "folder for root filesystem ($ROOTFS) already exists. Are you sure to use it? (y/N) " CONFIRM
   if [ "${CONFIRM^^}" != "Y" ]; then
-    finalize 1 "aborting"
+    bashc.finalize 1 "aborting"
   fi
 fi
 
@@ -465,13 +439,13 @@ while [ $i_current -lt ${#COMMANDS_TO_ADD[@]} ]; do
     if is_plugin_active "${p##*_}"; then
       p_debug "invoking plugin ${p##*_}"
       _C_PLUGIN="${p##*_}"
-      set_logger "${_C_PLUGIN^^}"
+      bashc.set_logger "${_C_PLUGIN^^}"
       if ! $p "$CURRENT_CMD"; then
         break
       fi
     fi
   done
-  set_logger
+  bashc.set_logger
   i_current=$(($i_current+1))
 done
 

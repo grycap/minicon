@@ -451,7 +451,7 @@ done
 
 if [ "$LDCONFIGFILE" != "" -a -e "$ROOTFS/$LDCONFIGFILE" ]; then
   p_debug "creating ldconfig"
-  TMPFILE=$(tempfile)
+  TMPFILE=$(bashc.tempfile)
   awk '!a[$0]++' "$ROOTFS/$LDCONFIGFILE" > "$TMPFILE"
   mv "$TMPFILE" "$ROOTFS/$LDCONFIGFILE"
   ldconfig -r "$ROOTFS"

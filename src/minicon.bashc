@@ -93,7 +93,7 @@ function verify_dependencies() {
       bashc.finalize 1 "tar command is needed to create tar files"
     fi
   fi
-  if ! ldd --version > /dev/null 2> /dev/null; then
+  if ! hash ldd > /dev/null 2> /dev/null; then
     bashc.finalize 1 "ldd command is needed for scripts plugin"
   fi
 }
